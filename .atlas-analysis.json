@@ -1,0 +1,162 @@
+{
+  "projectType": "sdk-library",
+  "projectName": "TypeORM",
+  "projectDescription": "A TypeScript and JavaScript ORM for Node.js that supports PostgreSQL, MySQL, MariaDB, SQLite, SQL Server, Oracle, MongoDB, and more — with both Active Record and Data Mapper patterns.",
+  "theme": "maple",
+  "primaryColor": "#f24c05",
+  "lightColor": "#e8ac7c",
+  "darkColor": "#2c044c",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "getting-started",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Data Source",
+            "pages": [
+              "data-source/data-source",
+              "data-source/data-source-options",
+              "data-source/multiple-data-sources",
+              "data-source/data-source-api",
+              "data-source/null-and-undefined-handling"
+            ]
+          },
+          {
+            "group": "Entities",
+            "pages": [
+              "entity/entities",
+              "entity/embedded-entities",
+              "entity/entity-inheritance",
+              "entity/tree-entities",
+              "entity/view-entities",
+              "entity/separating-entity-definition"
+            ]
+          },
+          {
+            "group": "Relations",
+            "pages": [
+              "relations/relations",
+              "relations/one-to-one-relations",
+              "relations/many-to-one-one-to-many-relations",
+              "relations/many-to-many-relations",
+              "relations/eager-and-lazy-relations",
+              "relations/relations-faq"
+            ]
+          },
+          {
+            "group": "Entity Manager & Repository",
+            "pages": [
+              "working-with-entity-manager/working-with-entity-manager",
+              "working-with-entity-manager/working-with-repository",
+              "working-with-entity-manager/find-options",
+              "working-with-entity-manager/custom-repository",
+              "working-with-entity-manager/entity-manager-api",
+              "working-with-entity-manager/repository-api"
+            ]
+          },
+          {
+            "group": "Query Builder",
+            "pages": [
+              "query-builder/select-query-builder",
+              "query-builder/insert-query-builder",
+              "query-builder/update-query-builder",
+              "query-builder/delete-query-builder",
+              "query-builder/relational-query-builder",
+              "query-builder/caching"
+            ]
+          },
+          {
+            "group": "Migrations",
+            "pages": [
+              "migrations/why",
+              "migrations/setup",
+              "migrations/creating",
+              "migrations/generating",
+              "migrations/executing",
+              "migrations/reverting",
+              "migrations/status",
+              "migrations/faking",
+              "migrations/api",
+              "migrations/extra",
+              "migrations/vite"
+            ]
+          },
+          {
+            "group": "Advanced Topics",
+            "pages": [
+              "advanced-topics/transactions",
+              "advanced-topics/indices",
+              "advanced-topics/listeners-and-subscribers",
+              "advanced-topics/logging",
+              "advanced-topics/using-cli",
+              "advanced-topics/performance-optimizing",
+              "query-runner"
+            ]
+          },
+          {
+            "group": "Drivers",
+            "pages": [
+              "drivers/postgres",
+              "drivers/mysql",
+              "drivers/sqlite",
+              "drivers/microsoft-sqlserver",
+              "drivers/mongodb",
+              "drivers/oracle",
+              "drivers/sap",
+              "drivers/google-spanner"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/active-record-data-mapper",
+              "guides/validation",
+              "guides/example-with-express",
+              "guides/usage-with-javascript",
+              "guides/sequelize-migration",
+              "guides/sql-tag",
+              "guides/migration-v1"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Active Record and Data Mapper patterns",
+    "Supports PostgreSQL, MySQL, MariaDB, SQLite, SQL Server, Oracle, MongoDB, CockroachDB, SAP HANA, Google Spanner",
+    "Powerful QueryBuilder for complex SQL queries",
+    "Automatic migration generation and execution",
+    "Eager and lazy loading of relations",
+    "OneToOne, ManyToOne, OneToMany, ManyToMany relations",
+    "Entity lifecycle listeners and event subscribers",
+    "Query caching with Redis and other adapters",
+    "CLI tools for migrations, schema sync, and scaffolding",
+    "Works in Node.js, Browser, React Native, Cordova, Electron, and Expo"
+  ],
+  "publicApiSurface": [
+    "DataSource",
+    "Entity",
+    "Column / PrimaryColumn / PrimaryGeneratedColumn",
+    "OneToOne / OneToMany / ManyToOne / ManyToMany",
+    "JoinColumn / JoinTable",
+    "Repository / TreeRepository / MongoRepository",
+    "EntityManager / MongoEntityManager",
+    "SelectQueryBuilder / InsertQueryBuilder / UpdateQueryBuilder / DeleteQueryBuilder",
+    "MigrationInterface / MigrationExecutor",
+    "EntitySubscriberInterface",
+    "BaseEntity (Active Record)",
+    "EntitySchema",
+    "NamingStrategyInterface",
+    "Find operators: Equal, Like, ILike, In, Between, IsNull, Not, And, Or, Raw",
+    "CLI commands: typeorm init, migration:run, migration:generate, migration:revert, schema:sync"
+  ]
+}

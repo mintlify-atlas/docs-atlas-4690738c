@@ -1,0 +1,151 @@
+---
+title: "DataSource"
+description: "DataSource is the core of TypeORM — it holds your database connection settings and manages the connection pool."
+---
+
+## What is a DataSource?
+
+A `DataSource` is your entry point to the database. It holds the connection configuration and manages the underlying connection pool for your chosen RDBMS. Every database operation in TypeORM goes through a `DataSource`.
+
+Before TypeORM 0.3, this was called `Connection`. `DataSource` is the current name and the one you should use in all new code.
+
+## Creating a DataSource
+
+Instantiate `DataSource` with a `DataSourceOptions` object and export the instance so you can use it anywhere in your application:
+
+```typescript app-data-source.ts
+import { DataSource } from "typeorm"
+
+export const AppDataSource = new DataSource({
+    type: "postgres",
+    host: "localhost",
+    port: 5432,
+    username: "test",
+    password: "test",
+    database: "test",
+    entities: [__dirname + "/entities/**/*{.js,.ts}"],
+    synchronize: false,
+})
+```
+
+<Note>
+  The `type` option is required. All other options depend on the database type
+  you choose. See [Data Source Options](/data-source/data-source-options) for
+  the full reference.
+</Note>
+
+## Initializing the connection
+
+Creating a `DataSource` instance does not open the connection. You must call `initialize()` before performing any database operations:
+
+```typescript main.ts
+import { AppDataSource } from "./app-data-source"
+
+try {
+    await AppDataSource.initialize()
+    console.log("Data Source initialized")
+} catch (error) {
+    console.error("Error initializing Data Source", error)
+    process.exit(1)
+}
+```
+
+Call `initialize()` once on application startup — typically in your main entry file, before your HTTP server or job queue begins accepting work.
+
+## Closing the connection
+
+Call `destroy()` to close all database connections in the pool:
+
+```typescript
+await AppDataSource.destroy()
+```
+
+In practice, most server applications never call `destroy()` because they run continuously. Call it during graceful shutdown when you need to drain connections before your process exits.
+
+## Checking connection state
+
+Use the `isInitialized` boolean property to check whether the `DataSource` has been initialized:
+
+```typescript
+if (!AppDataSource.isInitialized) {
+    await AppDataSource.initialize()
+}
+```
+
+## Using the EntityManager
+
+After initialization, access the `EntityManager` through the `manager` property to perform operations on any entity:
+
+```typescript user.controller.ts
+import { AppDataSource } from "./app-data-source"
+import { User } from "./entities/User"
+
+export class UserController {
+    async getAll() {
+        return AppDataSource.manager.find(User)
+    }
+
+    async getOne(id: number) {
+        return AppDataSource.manager.findOneBy(User, { id })
+    }
+}
+```
+
+## Using repositories
+
+For entity-specific operations, get a typed `Repository` using `getRepository()`:
+
+```typescript user.service.ts
+import { AppDataSource } from "./app-data-source"
+import { User } from "./entities/User"
+
+const userRepository = AppDataSource.getRepository(User)
+
+// Create and save a user
+const user = userRepository.create({
+    firstName: "Alice",
+    lastName: "Smith",
+})
+await userRepository.save(user)
+
+// Find a user
+const found = await userRepository.findOneBy({ id: 1 })
+
+// Update a user
+await userRepository.update(1, { firstName: "Bob" })
+
+// Delete a user
+await userRepository.delete(1)
+```
+
+For more on EntityManager and Repository, see [Working with EntityManager](/working-with-entity-manager/working-with-entity-manager) and [Repository API](/working-with-entity-manager/working-with-repository).
+
+## Multiple DataSource instances
+
+You can create as many `DataSource` instances as you need. This is useful when your application connects to different database servers or different database types:
+
+```typescript
+import { DataSource } from "typeorm"
+
+export const MysqlDataSource = new DataSource({
+    type: "mysql",
+    host: "localhost",
+    port: 3306,
+    username: "test",
+    password: "test",
+    database: "db1",
+    entities: [__dirname + "/entities/**/*{.js,.ts}"],
+})
+
+export const PostgresDataSource = new DataSource({
+    type: "postgres",
+    host: "localhost",
+    port: 5432,
+    username: "test",
+    password: "test",
+    database: "db2",
+    entities: [__dirname + "/entities/**/*{.js,.ts}"],
+})
+```
+
+See [Multiple Data Sources](/data-source/multiple-data-sources) for detailed patterns including cross-database queries, multiple schemas, and read/write replication.

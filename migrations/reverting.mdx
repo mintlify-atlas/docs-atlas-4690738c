@@ -1,0 +1,112 @@
+---
+title: "Reverting migrations"
+description: "Roll back the most recently applied migration using typeorm migration:revert."
+---
+
+If a migration causes problems, you can undo the most recently applied migration:
+
+<Tabs>
+  <Tab title="TypeScript (ts-node CommonJS)">
+    ```bash
+    npx typeorm-ts-node-commonjs migration:revert -d src/data-source.ts
+    ```
+  </Tab>
+  <Tab title="TypeScript (ts-node ESM)">
+    ```bash
+    npx typeorm-ts-node-esm migration:revert -d src/data-source.ts
+    ```
+  </Tab>
+  <Tab title="Compiled JavaScript">
+    ```bash
+    npx typeorm migration:revert -d dist/data-source.js
+    ```
+  </Tab>
+</Tabs>
+
+This command:
+1. Looks up the last entry in the `migrations` table.
+2. Calls that migration's `down` method.
+3. Removes the entry from the `migrations` table.
+
+## Reverting multiple migrations
+
+`migration:revert` always reverts exactly **one** migration. To roll back multiple migrations, run the command multiple times:
+
+```bash
+# Revert the last 3 migrations
+npx typeorm-ts-node-commonjs migration:revert -d src/data-source.ts
+npx typeorm-ts-node-commonjs migration:revert -d src/data-source.ts
+npx typeorm-ts-node-commonjs migration:revert -d src/data-source.ts
+```
+
+## CLI flags
+
+<ParamField path="-d, --dataSource" type="string" required>
+  Path to the file exporting your `DataSource` instance.
+</ParamField>
+
+<ParamField path="-t, --transaction" type="'all' | 'each' | 'none'" default="'default'">
+  Override the transaction mode for the revert. Defers to `migrationsTransactionMode` on the DataSource by default.
+</ParamField>
+
+<ParamField path="-f, --fake" type="boolean" default="false">
+  Remove the migration record from the migrations table without executing its `down` method. See [faking migrations](/migrations/faking).
+</ParamField>
+
+## Reverting programmatically
+
+You can also revert the last migration from application code:
+
+```typescript
+import { AppDataSource } from "./data-source"
+
+await AppDataSource.initialize()
+await AppDataSource.undoLastMigration({ transaction: "all" })
+await AppDataSource.destroy()
+```
+
+## Writing reliable `down` methods
+
+The revert command is only as safe as your `down` implementation. Every `up` change must have a precise inverse:
+
+<AccordionGroup>
+  <Accordion title="Column rename">
+    ```typescript
+    async up(queryRunner: QueryRunner): Promise<void> {
+        await queryRunner.query(`ALTER TABLE "post" RENAME COLUMN "title" TO "name"`)
+    }
+
+    async down(queryRunner: QueryRunner): Promise<void> {
+        await queryRunner.query(`ALTER TABLE "post" RENAME COLUMN "name" TO "title"`)
+    }
+    ```
+  </Accordion>
+  <Accordion title="Add column">
+    ```typescript
+    async up(queryRunner: QueryRunner): Promise<void> {
+        await queryRunner.query(`ALTER TABLE "user" ADD "email" varchar NOT NULL DEFAULT ''`)
+    }
+
+    async down(queryRunner: QueryRunner): Promise<void> {
+        await queryRunner.query(`ALTER TABLE "user" DROP COLUMN "email"`)
+    }
+    ```
+  </Accordion>
+  <Accordion title="Create table">
+    ```typescript
+    async up(queryRunner: QueryRunner): Promise<void> {
+        await queryRunner.query(
+            `CREATE TABLE "tag" ("id" SERIAL PRIMARY KEY, "name" varchar NOT NULL)`
+        )
+    }
+
+    async down(queryRunner: QueryRunner): Promise<void> {
+        await queryRunner.query(`DROP TABLE "tag"`)
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+<Warning>
+  If a `down` method drops a column or table, it will destroy any data stored there. Always confirm this is acceptable before reverting in production.
+</Warning>

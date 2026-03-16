@@ -1,122 +1,150 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "mint",
-  "name": "Mint Starter Kit",
+  "name": "TypeORM",
+  "theme": "maple",
   "colors": {
-    "primary": "#16A34A",
-    "light": "#07C983",
-    "dark": "#15803D"
+    "primary": "#f24c05",
+    "light": "#e8ac7c",
+    "dark": "#2c044c"
   },
-  "favicon": "/favicon.svg",
-  "navigation": {
-    "tabs": [
-      {
-        "tab": "Guides",
-        "groups": [
-          {
-            "group": "Getting started",
-            "pages": [
-              "index",
-              "quickstart",
-              "development"
-            ]
-          },
-          {
-            "group": "Customization",
-            "pages": [
-              "essentials/settings",
-              "essentials/navigation"
-            ]
-          },
-          {
-            "group": "Writing content",
-            "pages": [
-              "essentials/markdown",
-              "essentials/code",
-              "essentials/images",
-              "essentials/reusable-snippets"
-            ]
-          },
-          {
-            "group": "AI tools",
-            "pages": [
-              "ai-tools/cursor",
-              "ai-tools/claude-code",
-              "ai-tools/windsurf"
-            ]
-          }
-        ]
-      },
-      {
-        "tab": "API reference",
-        "groups": [
-          {
-            "group": "API documentation",
-            "pages": [
-              "api-reference/introduction"
-            ]
-          },
-          {
-            "group": "Endpoint examples",
-            "pages": [
-              "api-reference/endpoint/get",
-              "api-reference/endpoint/create",
-              "api-reference/endpoint/delete",
-              "api-reference/endpoint/webhook"
-            ]
-          }
-        ]
-      }
-    ],
-    "global": {
-      "anchors": [
-        {
-          "anchor": "Documentation",
-          "href": "https://mintlify.com/docs",
-          "icon": "book-open-cover"
-        },
-        {
-          "anchor": "Blog",
-          "href": "https://mintlify.com/blog",
-          "icon": "newspaper"
-        }
-      ]
-    }
-  },
+  "favicon": "https://media.brand.dev/34b57d94-47d6-4831-bcbd-431e619f2524.jpg",
   "logo": {
-    "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
+    "light": "https://media.brand.dev/81ee8f0b-8cc2-4f3e-8c4b-9f6ecdfcd1fc.png",
+    "dark": "https://media.brand.dev/81ee8f0b-8cc2-4f3e-8c4b-9f6ecdfcd1fc.png"
   },
   "navbar": {
-    "links": [
-      {
-        "label": "Support",
-        "href": "mailto:hi@mintlify.com"
-      }
-    ],
     "primary": {
-      "type": "button",
-      "label": "Dashboard",
-      "href": "https://dashboard.mintlify.com"
+      "type": "github",
+      "href": "https://github.com/typeorm/typeorm"
     }
-  },
-  "contextual": {
-    "options": [
-     "copy",
-     "view",
-     "chatgpt",
-     "claude",
-     "perplexity",
-     "mcp",
-     "cursor",
-     "vscode"
-   ]
   },
   "footer": {
     "socials": {
-      "x": "https://x.com/mintlify",
-      "github": "https://github.com/mintlify",
-      "linkedin": "https://linkedin.com/company/mintlify"
+      "github": "https://github.com/typeorm/typeorm"
     }
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "getting-started",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Data Source",
+            "pages": [
+              "data-source/data-source",
+              "data-source/data-source-options",
+              "data-source/multiple-data-sources",
+              "data-source/data-source-api",
+              "data-source/null-and-undefined-handling"
+            ]
+          },
+          {
+            "group": "Entities",
+            "pages": [
+              "entity/entities",
+              "entity/embedded-entities",
+              "entity/entity-inheritance",
+              "entity/tree-entities",
+              "entity/view-entities",
+              "entity/separating-entity-definition"
+            ]
+          },
+          {
+            "group": "Relations",
+            "pages": [
+              "relations/relations",
+              "relations/one-to-one-relations",
+              "relations/many-to-one-one-to-many-relations",
+              "relations/many-to-many-relations",
+              "relations/eager-and-lazy-relations",
+              "relations/relations-faq"
+            ]
+          },
+          {
+            "group": "Entity Manager & Repository",
+            "pages": [
+              "working-with-entity-manager/working-with-entity-manager",
+              "working-with-entity-manager/working-with-repository",
+              "working-with-entity-manager/find-options",
+              "working-with-entity-manager/custom-repository",
+              "working-with-entity-manager/entity-manager-api",
+              "working-with-entity-manager/repository-api"
+            ]
+          },
+          {
+            "group": "Query Builder",
+            "pages": [
+              "query-builder/select-query-builder",
+              "query-builder/insert-query-builder",
+              "query-builder/update-query-builder",
+              "query-builder/delete-query-builder",
+              "query-builder/relational-query-builder",
+              "query-builder/caching"
+            ]
+          },
+          {
+            "group": "Migrations",
+            "pages": [
+              "migrations/why",
+              "migrations/setup",
+              "migrations/creating",
+              "migrations/generating",
+              "migrations/executing",
+              "migrations/reverting",
+              "migrations/status",
+              "migrations/faking",
+              "migrations/api",
+              "migrations/extra",
+              "migrations/vite"
+            ]
+          },
+          {
+            "group": "Advanced Topics",
+            "pages": [
+              "advanced-topics/transactions",
+              "advanced-topics/indices",
+              "advanced-topics/listeners-and-subscribers",
+              "advanced-topics/logging",
+              "advanced-topics/using-cli",
+              "advanced-topics/performance-optimizing",
+              "query-runner"
+            ]
+          },
+          {
+            "group": "Drivers",
+            "pages": [
+              "drivers/postgres",
+              "drivers/mysql",
+              "drivers/sqlite",
+              "drivers/microsoft-sqlserver",
+              "drivers/mongodb",
+              "drivers/oracle",
+              "drivers/sap",
+              "drivers/google-spanner"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/active-record-data-mapper",
+              "guides/validation",
+              "guides/example-with-express",
+              "guides/usage-with-javascript",
+              "guides/sequelize-migration",
+              "guides/sql-tag",
+              "guides/migration-v1"
+            ]
+          }
+        ]
+      }
+    ]
   }
 }

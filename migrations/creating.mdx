@@ -1,0 +1,119 @@
+---
+title: "Creating migrations"
+description: "Create empty migration files with the TypeORM CLI and write up and down methods manually."
+---
+
+When you need to make a schema change that cannot be auto-generated—for example seeding data, or a complex multi-step migration—you create an empty migration file and write the SQL yourself.
+
+## Generating an empty migration file
+
+```bash
+npx typeorm migration:create <path/to/migrations>/<migration-name>
+```
+
+For example:
+
+```bash
+npx typeorm migration:create src/migrations/post-refactoring
+```
+
+This creates a file named `{TIMESTAMP}-post-refactoring.ts` in `src/migrations/`, where `{TIMESTAMP}` is the current Unix timestamp in milliseconds. The timestamp determines the execution order when you run migrations.
+
+## The generated file
+
+```typescript src/migrations/1699000000000-post-refactoring.ts
+import { MigrationInterface, QueryRunner } from "typeorm"
+
+export class PostRefactoring1699000000000 implements MigrationInterface {
+    async up(queryRunner: QueryRunner): Promise<void> {}
+
+    async down(queryRunner: QueryRunner): Promise<void> {}
+}
+```
+
+## The MigrationInterface
+
+Every migration must implement `MigrationInterface`, which requires two methods:
+
+```typescript
+import type { QueryRunner } from "typeorm"
+
+export interface MigrationInterface {
+    /** Optional. Defaults to the class name. */
+    name?: string
+
+    /**
+     * Per-migration transaction override.
+     * Only respected when migrationsTransactionMode is "each" or "none".
+     */
+    transaction?: boolean
+
+    /** Apply the migration. */
+    up(queryRunner: QueryRunner): Promise<any>
+
+    /** Revert the migration. */
+    down(queryRunner: QueryRunner): Promise<any>
+}
+```
+
+<ParamField path="up" type="(queryRunner: QueryRunner) => Promise<any>" required>
+  Contains the SQL or schema changes to apply. This method is called by `migration:run`.
+</ParamField>
+
+<ParamField path="down" type="(queryRunner: QueryRunner) => Promise<any>" required>
+  Reverses exactly what `up` did. This method is called by `migration:revert`. Always implement `down` so you can roll back safely.
+</ParamField>
+
+<ParamField path="name" type="string">
+  Overrides the migration name stored in the migrations table. Defaults to the class name.
+</ParamField>
+
+<ParamField path="transaction" type="boolean">
+  Opt individual migrations in or out of transactions when using `"each"` or `"none"` transaction mode. See [transaction modes](/migrations/extra).
+</ParamField>
+
+## Writing your migration
+
+Fill in the `up` and `down` methods using `queryRunner.query()` to execute raw SQL, or using the higher-level `QueryRunner` schema API.
+
+```typescript src/migrations/1699000000000-post-refactoring.ts
+import { MigrationInterface, QueryRunner } from "typeorm"
+
+export class PostRefactoring1699000000000 implements MigrationInterface {
+    async up(queryRunner: QueryRunner): Promise<void> {
+        await queryRunner.query(
+            `ALTER TABLE "post" RENAME COLUMN "title" TO "name"`,
+        )
+    }
+
+    async down(queryRunner: QueryRunner): Promise<void> {
+        await queryRunner.query(
+            `ALTER TABLE "post" RENAME COLUMN "name" TO "title"`,
+        )
+    }
+}
+```
+
+<Tip>
+  The `down` method must be the exact inverse of `up`. If `up` renames a column, `down` renames it back. If `up` creates a table, `down` drops it.
+</Tip>
+
+## QueryRunner in migrations
+
+The `QueryRunner` object passed to your `up` and `down` methods provides access to the underlying database connection. You can use it for raw SQL or for the typed schema-builder API:
+
+```typescript
+async up(queryRunner: QueryRunner): Promise<void> {
+    // Raw SQL
+    await queryRunner.query(`UPDATE "user" SET "role" = 'member' WHERE "role" IS NULL`)
+
+    // Schema builder API
+    await queryRunner.addColumn("user", new TableColumn({
+        name: "role",
+        type: "varchar",
+        default: "'member'",
+    }))
+}
+```
+
+For the full `QueryRunner` schema API, see the [QueryRunner API reference](/migrations/api).

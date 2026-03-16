@@ -1,0 +1,293 @@
+---
+title: "Multiple data sources"
+description: "Connect to multiple databases, use multiple schemas, and set up read/write replication in TypeORM."
+---
+
+TypeORM supports multiple databases, schemas, and replication through its `DataSource` model. Each `DataSource` is an independent connection pool.
+
+## Multiple separate DataSource instances
+
+To connect to different databases or different database servers, create one `DataSource` per connection:
+
+```typescript
+import { DataSource } from "typeorm"
+
+export const db1DataSource = new DataSource({
+    type: "mysql",
+    host: "localhost",
+    port: 3306,
+    username: "root",
+    password: "admin",
+    database: "db1",
+    entities: [__dirname + "/entities/*{.js,.ts}"],
+    synchronize: true,
+})
+
+export const db2DataSource = new DataSource({
+    type: "mysql",
+    host: "localhost",
+    port: 3306,
+    username: "root",
+    password: "admin",
+    database: "db2",
+    entities: [__dirname + "/entities/*{.js,.ts}"],
+    synchronize: true,
+})
+```
+
+Initialize each source independently at startup:
+
+```typescript
+await db1DataSource.initialize()
+await db2DataSource.initialize()
+```
+
+## Multiple databases within a single DataSource
+
+If you need entities spread across different database names on the same server, set the `database` property on each entity decorator. This avoids managing multiple connection pools.
+
+```typescript User.ts
+import { Entity, PrimaryGeneratedColumn, Column } from "typeorm"
+
+@Entity({ database: "secondDB" })
+export class User {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    @Column()
+    firstName: string
+
+    @Column()
+    lastName: string
+}
+```
+
+```typescript Photo.ts
+import { Entity, PrimaryGeneratedColumn, Column } from "typeorm"
+
+@Entity({ database: "thirdDB" })
+export class Photo {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    @Column()
+    url: string
+}
+```
+
+Entities without an explicit `database` property are created in the default database defined in the data source options. To query across these databases, provide the entities directly to `createQueryBuilder()`:
+
+```typescript
+const users = await dataSource
+    .createQueryBuilder()
+    .select()
+    .from(User, "user")
+    .addFrom(Photo, "photo")
+    .andWhere("photo.userId = user.id")
+    .getMany()
+```
+
+This produces:
+
+```sql
+SELECT * FROM "secondDB"."user" "user", "thirdDB"."photo" "photo"
+    WHERE "photo"."userId" = "user"."id"
+```
+
+You can also pass table paths as strings:
+
+```typescript
+const users = await dataSource
+    .createQueryBuilder()
+    .select()
+    .from("secondDB.user", "user")
+    .addFrom("thirdDB.photo", "photo")
+    .andWhere("photo.userId = user.id")
+    .getMany()
+```
+
+<Note>
+  Cross-database queries using this approach are supported only on **MySQL** and
+  **SQL Server**.
+</Note>
+
+## Multiple schemas within a single DataSource
+
+For databases that support schemas (PostgreSQL, SQL Server), set the `schema` property on each entity:
+
+```typescript User.ts
+@Entity({ schema: "secondSchema" })
+export class User {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    @Column()
+    firstName: string
+
+    @Column()
+    lastName: string
+}
+```
+
+```typescript Photo.ts
+@Entity({ schema: "thirdSchema" })
+export class Photo {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    @Column()
+    url: string
+}
+```
+
+Querying across schemas works the same way:
+
+```typescript
+const users = await dataSource
+    .createQueryBuilder()
+    .select()
+    .from(User, "user")
+    .addFrom(Photo, "photo")
+    .andWhere("photo.userId = user.id")
+    .getMany()
+// Generates: SELECT * FROM "secondSchema"."user" "user",
+//                         "thirdSchema"."photo" "photo"
+//            WHERE "photo"."userId" = "user"."id"
+```
+
+With SQL Server, you can combine both `database` and `schema` on the same entity:
+
+```typescript
+@Entity({ database: "secondDB", schema: "public" })
+export class User { ... }
+```
+
+<Note>
+  Multiple schemas within a single DataSource are supported only on
+  **PostgreSQL** and **SQL Server**.
+</Note>
+
+## Read/write replication
+
+TypeORM supports read/write replication for scaling read traffic. Configure it through the `replication` option:
+
+```typescript
+const datasource = new DataSource({
+    type: "mysql",
+    logging: true,
+    replication: {
+        master: {
+            host: "server1",
+            port: 3306,
+            username: "test",
+            password: "test",
+            database: "test",
+        },
+        slaves: [
+            {
+                host: "server2",
+                port: 3306,
+                username: "test",
+                password: "test",
+                database: "test",
+            },
+            {
+                host: "server3",
+                port: 3306,
+                username: "test",
+                password: "test",
+                database: "test",
+            },
+        ],
+    },
+})
+```
+
+With replication configured, TypeORM routes queries automatically:
+
+- `find` methods and `SelectQueryBuilder` use a random **slave**
+- `update`, `create`, `InsertQueryBuilder`, `UpdateQueryBuilder`, and similar writes use the **master**
+- Raw `.query()` calls use the **master**
+- Schema operations use the **master**
+
+### Explicitly choosing master or slave
+
+When a read query must return up-to-date data, force it to the master by creating a query runner with the `"master"` mode:
+
+```typescript
+const masterQueryRunner = dataSource.createQueryRunner("master")
+try {
+    const posts = await dataSource
+        .createQueryBuilder(Post, "post", masterQueryRunner)
+        .getMany()
+} finally {
+    await masterQueryRunner.release()
+}
+```
+
+To send a raw query to a slave:
+
+```typescript
+const slaveQueryRunner = dataSource.createQueryRunner("slave")
+try {
+    const users = await slaveQueryRunner.query(
+        "SELECT * FROM users WHERE id = $1",
+        [userId],
+    )
+} finally {
+    await slaveQueryRunner.release()
+}
+```
+
+<Warning>
+  Always release manually created `QueryRunner` instances. Unreleased runners
+  hold connections checked out of the pool, blocking other queries.
+</Warning>
+
+### Changing the default read destination
+
+By default, reads go to a random slave. To keep all reads on the master until you explicitly opt in to slaves, set `defaultMode: "master"`:
+
+```typescript
+const datasource = new DataSource({
+    type: "mysql",
+    replication: {
+        defaultMode: "master",
+        master: { host: "server1", port: 3306, username: "test", password: "test", database: "test" },
+        slaves: [
+            { host: "server2", port: 3306, username: "test", password: "test", database: "test" },
+        ],
+    },
+})
+```
+
+This is a safe way to add replication to an existing app without changing query routing behavior immediately.
+
+### MySQL-specific replication options
+
+```typescript
+replication: {
+    master: { /* ... */ },
+    slaves: [ /* ... */ ],
+
+    // Attempt to reconnect when a connection fails (default: true)
+    canRetry: true,
+
+    // Remove a node from the pool after this many consecutive failures (default: 5)
+    removeNodeErrorCount: 5,
+
+    // Milliseconds to wait before retrying a failed node.
+    // Set to 0 to permanently remove the node (default: 0)
+    restoreNodeTimeout: 0,
+
+    // Slave selection strategy:
+    // "RR"     — round-robin
+    // "RANDOM" — random selection
+    // "ORDER"  — always use the first available slave
+    selector: "RR",
+}
+```
+
+### Supported drivers
+
+Replication is supported on: **MySQL**, **PostgreSQL**, **SQL Server**, **CockroachDB**, **Oracle**, and **Spanner**.

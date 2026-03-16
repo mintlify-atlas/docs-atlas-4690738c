@@ -1,0 +1,339 @@
+---
+title: Migrating from Sequelize
+description: Map Sequelize concepts to TypeORM equivalents — models, sync, finders, hooks, associations, and more.
+---
+
+This guide maps Sequelize patterns to their TypeORM equivalents. Each section shows the Sequelize code alongside the TypeORM replacement.
+
+## Setting up a data source
+
+<CodeGroup>
+
+```javascript Sequelize
+const sequelize = new Sequelize("database", "username", "password", {
+    host: "localhost",
+    dialect: "mysql",
+})
+
+sequelize
+    .authenticate()
+    .then(() => console.log("Connected"))
+    .catch((err) => console.error("Error:", err))
+```
+
+```typescript TypeORM
+import { DataSource } from "typeorm"
+
+const dataSource = new DataSource({
+    type: "mysql",
+    host: "localhost",
+    username: "username",
+    password: "password",
+    database: "database",
+})
+
+dataSource
+    .initialize()
+    .then(() => console.log("Data Source initialized"))
+    .catch((err) => console.error("Error:", err))
+```
+
+</CodeGroup>
+
+## Schema synchronization
+
+<CodeGroup>
+
+```javascript Sequelize
+Project.sync({ force: true })
+Task.sync({ force: true })
+```
+
+```typescript TypeORM
+const dataSource = new DataSource({
+    type: "mysql",
+    host: "localhost",
+    username: "username",
+    password: "password",
+    synchronize: true,  // syncs all entities on initialize()
+})
+```
+
+</CodeGroup>
+
+<Warning>
+Do not use `synchronize: true` in production. Use [migrations](/migrations/why) instead.
+</Warning>
+
+## Defining models
+
+<CodeGroup>
+
+```javascript Sequelize
+module.exports = function (sequelize, DataTypes) {
+    return sequelize.define("project", {
+        title: DataTypes.STRING,
+        description: DataTypes.TEXT,
+    })
+}
+```
+
+```typescript TypeORM
+import { Entity, PrimaryGeneratedColumn, Column } from "typeorm"
+
+@Entity()
+export class Project {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    @Column()
+    title: string
+
+    @Column()
+    description: string
+}
+```
+
+</CodeGroup>
+
+TypeORM recommends one entity class per file.
+
+## Column options
+
+The table below maps common Sequelize column options to TypeORM:
+
+| Sequelize | TypeORM |
+|---|---|
+| `{ type: Sequelize.BOOLEAN, allowNull: true, defaultValue: true }` | `@Column({ nullable: true, default: true }) flag: boolean` |
+| `{ type: Sequelize.DATE, defaultValue: Sequelize.NOW }` | `@Column({ default: () => "NOW()" }) myDate: Date` |
+| `{ type: Sequelize.STRING, unique: true }` | `@Column({ unique: true }) someUnique: string` |
+| `{ type: Sequelize.STRING, field: "field_with_underscores" }` | `@Column({ name: "field_with_underscores" }) fieldWithUnderscores: string` |
+| `{ type: Sequelize.INTEGER, autoIncrement: true }` | `@Column() @Generated() incrementMe: number` |
+| `{ type: Sequelize.STRING, primaryKey: true }` | `@Column({ primary: true }) identifier: string` |
+
+### Timestamps
+
+Sequelize adds `createdAt` and `updatedAt` columns automatically. In TypeORM, declare them explicitly:
+
+```typescript
+@CreateDateColumn()
+createdAt: Date
+
+@UpdateDateColumn()
+updatedAt: Date
+```
+
+## Creating and saving records
+
+<CodeGroup>
+
+```javascript Sequelize
+const employee = await Employee.create({
+    name: "John Doe",
+    title: "senior engineer",
+})
+```
+
+```typescript TypeORM (Data Mapper)
+const employee = new Employee()
+employee.name = "John Doe"
+employee.title = "senior engineer"
+await dataSource.getRepository(Employee).save(employee)
+```
+
+```typescript TypeORM (Active Record)
+const employee = Employee.create({ name: "John Doe", title: "senior engineer" })
+await employee.save()
+```
+
+</CodeGroup>
+
+### Loading an existing entity
+
+```typescript
+// Sequelize
+const employee = await Employee.findByPk(1)
+
+// TypeORM
+const employee = await dataSource
+    .getRepository(Employee)
+    .findOneBy({ id: 1 })
+```
+
+### Preloading (replace + reload from DB)
+
+```typescript
+// Replaces properties and reloads from the database
+const employee = await dataSource
+    .getRepository(Employee)
+    .preload({ id: 1, name: "John Doe" })
+```
+
+## Accessing properties
+
+<CodeGroup>
+
+```javascript Sequelize
+console.log(employee.get("name"))
+```
+
+```typescript TypeORM
+console.log(employee.name)
+```
+
+</CodeGroup>
+
+TypeORM entities are plain objects — no getter methods are needed.
+
+## Querying records
+
+<CodeGroup>
+
+```javascript Sequelize
+// Find all
+const projects = await Project.findAll()
+
+// Find with conditions
+const projects = await Project.findAll({ where: { title: "My Project" } })
+
+// Find one
+const project = await Project.findOne({ where: { id: 1 } })
+
+// Find by primary key
+const project = await Project.findByPk(1)
+```
+
+```typescript TypeORM
+// Find all
+const projects = await repo.find()
+
+// Find with conditions
+const projects = await repo.findBy({ title: "My Project" })
+
+// Find one
+const project = await repo.findOneBy({ id: 1 })
+
+// Find by primary key (same as findOneBy with id)
+const project = await repo.findOneBy({ id: 1 })
+```
+
+</CodeGroup>
+
+## Associations vs relations
+
+<CodeGroup>
+
+```javascript Sequelize
+Project.hasMany(Task)
+Task.belongsTo(Project)
+```
+
+```typescript TypeORM
+// project.entity.ts
+@Entity()
+export class Project {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    @OneToMany(() => Task, (task) => task.project)
+    tasks: Task[]
+}
+
+// task.entity.ts
+@Entity()
+export class Task {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    @ManyToOne(() => Project, (project) => project.tasks)
+    project: Project
+}
+```
+
+</CodeGroup>
+
+### Association types mapping
+
+| Sequelize | TypeORM |
+|---|---|
+| `hasOne` | `@OneToOne` + `@JoinColumn` on owner side |
+| `belongsTo` | `@ManyToOne` |
+| `hasMany` | `@OneToMany` |
+| `belongsToMany` | `@ManyToMany` + `@JoinTable` on owner side |
+
+## Hooks vs lifecycle listeners
+
+<CodeGroup>
+
+```javascript Sequelize
+User.beforeCreate((user) => {
+    user.password = hashPassword(user.password)
+})
+
+User.afterCreate((user) => {
+    sendWelcomeEmail(user.email)
+})
+```
+
+```typescript TypeORM
+@Entity()
+export class User {
+    @Column()
+    password: string
+
+    @BeforeInsert()
+    hashPassword() {
+        this.password = hashPassword(this.password)
+    }
+
+    @AfterInsert()
+    sendWelcomeEmail() {
+        sendWelcomeEmail(this.email)
+    }
+}
+```
+
+</CodeGroup>
+
+### Hook equivalents
+
+| Sequelize hook | TypeORM decorator |
+|---|---|
+| `beforeCreate` | `@BeforeInsert` |
+| `afterCreate` | `@AfterInsert` |
+| `beforeUpdate` | `@BeforeUpdate` |
+| `afterUpdate` | `@AfterUpdate` |
+| `beforeDestroy` | `@BeforeRemove` |
+| `afterDestroy` | `@AfterRemove` |
+| `afterFind` | `@AfterLoad` |
+
+For hooks that require database access, use [subscribers](/advanced-topics/listeners-and-subscribers) instead of entity lifecycle decorators.
+
+## Indexes
+
+<CodeGroup>
+
+```javascript Sequelize
+sequelize.define(
+    "user",
+    {},
+    {
+        indexes: [
+            { unique: true, fields: ["firstName", "lastName"] },
+        ],
+    },
+)
+```
+
+```typescript TypeORM
+@Entity()
+@Index(["firstName", "lastName"], { unique: true })
+export class User {
+    @Column() firstName: string
+    @Column() lastName: string
+}
+```
+
+</CodeGroup>
+
+Learn more in [Indices](/advanced-topics/indices).

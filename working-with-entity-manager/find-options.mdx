@@ -1,0 +1,547 @@
+---
+title: "Find options"
+description: "Filter, sort, paginate, and lock queries using FindOneOptions and FindManyOptions without writing raw SQL or using QueryBuilder."
+---
+
+## Overview
+
+All `find*` methods on `Repository` and `EntityManager` accept a structured options object instead of raw SQL. TypeORM maps these options to the appropriate SQL clauses automatically.
+
+There are two option interfaces:
+
+- **`FindOneOptions`** — used by `findOne`, `findOneBy`, `findOneOrFail`, `findOneByOrFail`.
+- **`FindManyOptions`** — extends `FindOneOptions` and adds `skip` and `take` for pagination. Used by `find`, `findBy`, `findAndCount`, `findAndCountBy`.
+
+## Basic options
+
+### select
+
+Specify which columns to retrieve. Unselected columns are omitted from the result object.
+
+```typescript
+const users = await userRepository.find({
+    select: {
+        firstName: true,
+        lastName: true,
+    },
+})
+// SELECT "firstName", "lastName" FROM "user"
+```
+
+Nested properties for embedded entities work the same way:
+
+```typescript
+const users = await userRepository.find({
+    select: {
+        id: true,
+        profile: {
+            bio: true,
+        },
+    },
+})
+```
+
+### where
+
+Simple equality conditions are written as plain objects. Multiple properties are combined with `AND`:
+
+```typescript
+const users = await userRepository.find({
+    where: {
+        firstName: "Timber",
+        lastName: "Saw",
+    },
+})
+// SELECT * FROM "user" WHERE "firstName" = 'Timber' AND "lastName" = 'Saw'
+```
+
+Pass an array of condition objects to combine them with `OR`:
+
+```typescript
+const users = await userRepository.find({
+    where: [
+        { firstName: "Timber", lastName: "Saw" },
+        { firstName: "Stan", lastName: "Lee" },
+    ],
+})
+// WHERE ("firstName" = 'Timber' AND "lastName" = 'Saw')
+//    OR ("firstName" = 'Stan' AND "lastName" = 'Lee')
+```
+
+Query columns on a related entity by nesting the condition:
+
+```typescript
+const users = await userRepository.find({
+    relations: { project: true },
+    where: {
+        project: {
+            name: "TypeORM",
+        },
+    },
+})
+// LEFT JOIN "project" ON ... WHERE "project"."name" = 'TypeORM'
+```
+
+### relations
+
+Load related entities using left joins. Specify which relations to include using a nested boolean object:
+
+```typescript
+const users = await userRepository.find({
+    relations: {
+        profile: true,
+        photos: true,
+    },
+})
+```
+
+Load nested relations by nesting further:
+
+```typescript
+const users = await userRepository.find({
+    relations: {
+        profile: true,
+        videos: {
+            videoAttributes: true,
+        },
+    },
+})
+```
+
+<Tip>
+  For large datasets with deeply nested relations, consider using `relationLoadStrategy: "query"` to load relations via separate SELECT queries instead of JOINs.
+</Tip>
+
+### order
+
+```typescript
+const users = await userRepository.find({
+    order: {
+        lastName: "ASC",
+        createdAt: "DESC",
+    },
+})
+// ORDER BY "lastName" ASC, "createdAt" DESC
+```
+
+### skip and take
+
+Use `skip` and `take` together for offset-based pagination:
+
+```typescript
+const users = await userRepository.find({
+    order: { id: "ASC" },
+    skip: 0,
+    take: 10,
+})
+// SELECT * FROM "user" ORDER BY "id" ASC LIMIT 10 OFFSET 0
+```
+
+<Warning>
+  When using MSSQL, `take` or `skip` must always be combined with `order`. Omitting `order` causes the database to throw an error.
+</Warning>
+
+### withDeleted
+
+By default, `find*` methods exclude soft-deleted rows (those with a non-null `@DeleteDateColumn`). Set `withDeleted: true` to include them:
+
+```typescript
+const allUsers = await userRepository.find({
+    withDeleted: true,
+})
+```
+
+### cache
+
+Enable query result caching to avoid redundant database round-trips:
+
+```typescript
+// Use the default cache TTL
+const users = await userRepository.find({ cache: true })
+
+// Cache for a specific duration (milliseconds)
+const users = await userRepository.find({ cache: 60000 })
+
+// Named cache entry with a custom TTL
+const users = await userRepository.find({
+    cache: { id: "all_users", milliseconds: 30000 },
+})
+```
+
+### lock
+
+Apply a database-level row lock when using `findOne` or `findOneBy`:
+
+```typescript
+// Optimistic lock
+const user = await userRepository.findOne({
+    where: { id: 1 },
+    lock: { mode: "optimistic", version: 1 },
+})
+
+// Pessimistic write lock with NOWAIT
+const user = await userRepository.findOne({
+    where: { id: 1 },
+    lock: { mode: "pessimistic_write", onLocked: "nowait" },
+})
+```
+
+Available lock modes:
+
+| Mode | Description |
+|---|---|
+| `optimistic` | Checks `@VersionColumn` or `@UpdateDateColumn` against the supplied `version` value. |
+| `pessimistic_read` | `SELECT ... FOR SHARE` |
+| `pessimistic_write` | `SELECT ... FOR UPDATE` |
+| `dirty_read` | Read uncommitted data (SQL Server / MySQL). |
+| `for_no_key_update` | `SELECT ... FOR NO KEY UPDATE` (PostgreSQL). |
+| `for_key_share` | `SELECT ... FOR KEY SHARE` (PostgreSQL). |
+
+Pessimistic lock options:
+
+<ParamField path="tables" type="string[]">
+  Restrict the lock to specific tables. Pass table names (not relation names).
+</ParamField>
+
+<ParamField path="onLocked" type="'nowait' | 'skip_locked'">
+  `nowait` raises an error immediately if any row is locked. `skip_locked` silently skips locked rows.
+</ParamField>
+
+## Advanced operators
+
+TypeORM provides a set of operator functions that you can use inside `where` conditions to express comparisons beyond simple equality. Import them from `"typeorm"`.
+
+<AccordionGroup>
+  <Accordion title="Equal">
+    Explicit equality check. Equivalent to writing the value directly but useful when combining with `Not`.
+
+    ```typescript
+    import { Equal } from "typeorm"
+
+    const posts = await postRepository.findBy({
+        title: Equal("About #2"),
+    })
+    // WHERE "title" = 'About #2'
+    ```
+  </Accordion>
+
+  <Accordion title="Not">
+    Negates any operator, or a plain value.
+
+    ```typescript
+    import { Not } from "typeorm"
+
+    const posts = await postRepository.findBy({
+        title: Not("About #1"),
+    })
+    // WHERE "title" != 'About #1'
+    ```
+
+    Combine with other operators:
+
+    ```typescript
+    import { Not, MoreThan, Equal } from "typeorm"
+
+    const posts = await postRepository.findBy({
+        likes: Not(MoreThan(10)),
+        title: Not(Equal("About #2")),
+    })
+    // WHERE NOT("likes" > 10) AND NOT("title" = 'About #2')
+    ```
+  </Accordion>
+
+  <Accordion title="Like and ILike">
+    SQL `LIKE` pattern matching. Use `%` as a wildcard.
+
+    ```typescript
+    import { Like } from "typeorm"
+
+    const posts = await postRepository.findBy({
+        title: Like("%out #%"),
+    })
+    // WHERE "title" LIKE '%out #%'
+    ```
+
+    `ILike` is the case-insensitive variant (PostgreSQL `ILIKE`):
+
+    ```typescript
+    import { ILike } from "typeorm"
+
+    const posts = await postRepository.findBy({
+        title: ILike("%about%"),
+    })
+    // WHERE "title" ILIKE '%about%'
+    ```
+  </Accordion>
+
+  <Accordion title="In">
+    Matches any value in the provided array.
+
+    ```typescript
+    import { In } from "typeorm"
+
+    const posts = await postRepository.findBy({
+        title: In(["About #2", "About #3"]),
+    })
+    // WHERE "title" IN ('About #2', 'About #3')
+    ```
+  </Accordion>
+
+  <Accordion title="Between">
+    Matches values within an inclusive range.
+
+    ```typescript
+    import { Between } from "typeorm"
+
+    const posts = await postRepository.findBy({
+        likes: Between(1, 10),
+    })
+    // WHERE "likes" BETWEEN 1 AND 10
+    ```
+  </Accordion>
+
+  <Accordion title="IsNull">
+    Matches `NULL` values.
+
+    ```typescript
+    import { IsNull } from "typeorm"
+
+    const posts = await postRepository.findBy({
+        title: IsNull(),
+    })
+    // WHERE "title" IS NULL
+    ```
+  </Accordion>
+
+  <Accordion title="MoreThan and LessThan">
+    Numeric and date comparisons.
+
+    ```typescript
+    import { MoreThan, LessThan, MoreThanOrEqual, LessThanOrEqual } from "typeorm"
+
+    // Strictly greater than
+    await postRepository.findBy({ likes: MoreThan(10) })
+    // WHERE "likes" > 10
+
+    // Greater than or equal
+    await postRepository.findBy({ likes: MoreThanOrEqual(10) })
+    // WHERE "likes" >= 10
+
+    // Strictly less than
+    await postRepository.findBy({ likes: LessThan(10) })
+    // WHERE "likes" < 10
+
+    // Less than or equal
+    await postRepository.findBy({ likes: LessThanOrEqual(10) })
+    // WHERE "likes" <= 10
+    ```
+  </Accordion>
+
+  <Accordion title="Or">
+    Combine multiple conditions on the same column with `OR`.
+
+    ```typescript
+    import { Or, Equal, ILike } from "typeorm"
+
+    const posts = await postRepository.findBy({
+        title: Or(Equal("About #2"), ILike("About%")),
+    })
+    // WHERE "title" = 'About #2' OR "title" ILIKE 'About%'
+    ```
+  </Accordion>
+
+  <Accordion title="And">
+    Combine multiple conditions on the same column with `AND`.
+
+    ```typescript
+    import { And, Not, Equal, ILike } from "typeorm"
+
+    const posts = await postRepository.findBy({
+        title: And(Not(Equal("About #2")), ILike("%About%")),
+    })
+    // WHERE NOT("title" = 'About #2') AND "title" ILIKE '%About%'
+    ```
+  </Accordion>
+
+  <Accordion title="Any">
+    Matches any value in an array using the PostgreSQL `= ANY()` syntax.
+
+    ```typescript
+    import { Any } from "typeorm"
+
+    const posts = await postRepository.findBy({
+        title: Any(["About #2", "About #3"]),
+    })
+    // WHERE "title" = ANY(['About #2', 'About #3'])
+    ```
+  </Accordion>
+
+  <Accordion title="ArrayContains, ArrayContainedBy, ArrayOverlap">
+    Operators for PostgreSQL/CockroachDB array columns.
+
+    ```typescript
+    import { ArrayContains, ArrayContainedBy, ArrayOverlap } from "typeorm"
+
+    // Column array contains all supplied values
+    await postRepository.findBy({ categories: ArrayContains(["TypeScript"]) })
+    // WHERE "categories" @> '{TypeScript}'
+
+    // Column array is contained within the supplied values
+    await postRepository.findBy({ categories: ArrayContainedBy(["TypeScript", "JavaScript"]) })
+    // WHERE "categories" <@ '{TypeScript,JavaScript}'
+
+    // Column array shares at least one value with the supplied array
+    await postRepository.findBy({ categories: ArrayOverlap(["TypeScript"]) })
+    // WHERE "categories" && '{TypeScript}'
+    ```
+  </Accordion>
+
+  <Accordion title="JsonContains">
+    PostgreSQL and CockroachDB only. Checks that a JSONB column contains the supplied JSON value.
+
+    ```typescript
+    import { JsonContains } from "typeorm"
+
+    const posts = await postRepository.findBy({
+        metadata: JsonContains({ author: { name: "John" } }),
+    })
+    // WHERE "metadata" ::jsonb @> '{"author":{"name":"John"}}'
+    ```
+  </Accordion>
+
+  <Accordion title="Raw">
+    Escape hatch for arbitrary SQL expressions when no built-in operator fits.
+
+    Direct expression after `=`:
+
+    ```typescript
+    import { Raw } from "typeorm"
+
+    const posts = await postRepository.findBy({
+        likes: Raw("dislikes - 4"),
+    })
+    // WHERE "likes" = "dislikes" - 4
+    ```
+
+    Function form (receives the column alias):
+
+    ```typescript
+    const posts = await postRepository.findBy({
+        currentDate: Raw((alias) => `${alias} > NOW()`),
+    })
+    // WHERE "currentDate" > NOW()
+    ```
+
+    Parameterized (safe for user input):
+
+    ```typescript
+    const posts = await postRepository.findBy({
+        currentDate: Raw((alias) => `${alias} > :date`, { date: "2020-10-06" }),
+    })
+    // WHERE "currentDate" > '2020-10-06'
+    ```
+
+    Array parameters:
+
+    ```typescript
+    const posts = await postRepository.findBy({
+        title: Raw(
+            (alias) => `${alias} IN (:...titles)`,
+            { titles: ["Go To Statement Considered Harmful", "Structured Programming"] },
+        ),
+    })
+    ```
+
+    <Warning>
+      Do not interpolate user-supplied strings directly into the expression. Use the parameters argument to bind values safely.
+    </Warning>
+  </Accordion>
+</AccordionGroup>
+
+## Complete example
+
+```typescript
+const [users, total] = await userRepository.findAndCount({
+    select: {
+        firstName: true,
+        lastName: true,
+    },
+    relations: {
+        profile: true,
+        photos: true,
+    },
+    where: {
+        firstName: "Timber",
+        profile: {
+            userName: "tshaw",
+        },
+    },
+    order: {
+        lastName: "ASC",
+        id: "DESC",
+    },
+    skip: 0,
+    take: 10,
+    cache: true,
+})
+```
+
+## FindOneOptions reference
+
+<ParamField path="select" type="FindOptionsSelect<Entity>">
+  Specify which columns to retrieve. Omitted columns are excluded from the result.
+</ParamField>
+
+<ParamField path="where" type="FindOptionsWhere<Entity> | FindOptionsWhere<Entity>[]">
+  Filter condition. Object properties are combined with `AND`. An array of objects is combined with `OR`.
+</ParamField>
+
+<ParamField path="relations" type="FindOptionsRelations<Entity>">
+  Relations to load via left join. Nested objects load nested relations.
+</ParamField>
+
+<ParamField path="relationLoadStrategy" type="'join' | 'query'" default="'join'">
+  Load strategy for relations. Use `'query'` to load relations via separate SELECT queries instead of JOINs.
+</ParamField>
+
+<ParamField path="order" type="FindOptionsOrder<Entity>">
+  Sorting order. Values are `'ASC'`, `'DESC'`, or an order options object.
+</ParamField>
+
+<ParamField path="withDeleted" type="boolean" default="false">
+  Include soft-deleted entities (those with a non-null `@DeleteDateColumn`).
+</ParamField>
+
+<ParamField path="loadRelationIds" type="boolean | object">
+  Load relation IDs instead of full relation objects. Pass `{ relations: ['profile'] }` to limit to specific relations.
+</ParamField>
+
+<ParamField path="loadEagerRelations" type="boolean" default="true">
+  When `false`, eager relations defined on the entity are not loaded.
+</ParamField>
+
+<ParamField path="lock" type="object">
+  Row-level lock. See [lock options](#lock) above.
+</ParamField>
+
+<ParamField path="cache" type="boolean | number | object">
+  Enable query result caching.
+</ParamField>
+
+<ParamField path="comment" type="string">
+  Adds a SQL comment to the generated query. Useful for identifying queries in database logs.
+</ParamField>
+
+<ParamField path="transaction" type="boolean" default="false">
+  When `true`, wraps the SELECT in a transaction.
+</ParamField>
+
+## FindManyOptions additional fields
+
+<ParamField path="skip" type="number">
+  Number of rows to skip (SQL `OFFSET`). Use with `take` for pagination.
+</ParamField>
+
+<ParamField path="take" type="number">
+  Maximum number of rows to return (SQL `LIMIT`).
+</ParamField>

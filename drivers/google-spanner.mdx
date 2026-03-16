@@ -1,0 +1,191 @@
+---
+title: "Google Spanner"
+description: "Connect TypeORM to Google Cloud Spanner using the @google-cloud/spanner driver. Covers authentication, the Spanner emulator, DataSource configuration, and supported column types."
+---
+
+TypeORM supports Google Cloud Spanner through the `@google-cloud/spanner` package.
+
+<Note>
+  Google Spanner support in TypeORM is experimental. Some features available on relational databases (such as certain migration operations and complex joins) may not work as expected. Test thoroughly before using in production.
+</Note>
+
+## Installation
+
+<CodeGroup>
+
+```bash npm
+npm install @google-cloud/spanner
+```
+
+```bash yarn
+yarn add @google-cloud/spanner
+```
+
+```bash pnpm
+pnpm add @google-cloud/spanner
+```
+
+</CodeGroup>
+
+## Authentication
+
+Spanner uses [Application Default Credentials (ADC)](https://cloud.google.com/docs/authentication/application-default-credentials). Set the `GOOGLE_APPLICATION_CREDENTIALS` environment variable to the path of your service account key file:
+
+<Tabs>
+  <Tab title="Linux / macOS">
+
+```bash
+export GOOGLE_APPLICATION_CREDENTIALS="/path/to/service-account-key.json"
+```
+
+  </Tab>
+  <Tab title="Windows">
+
+```bat
+set GOOGLE_APPLICATION_CREDENTIALS=C:\path\to\service-account-key.json
+```
+
+  </Tab>
+</Tabs>
+
+Alternatively, use `gcloud auth application-default login` for local development, or rely on the metadata server when running on Google Cloud infrastructure (GCE, GKE, Cloud Run, etc.).
+
+## Spanner emulator
+
+For local development and testing, use the [Spanner emulator](https://cloud.google.com/spanner/docs/emulator):
+
+<Tabs>
+  <Tab title="Linux / macOS">
+
+```bash
+export SPANNER_EMULATOR_HOST=localhost:9010
+```
+
+  </Tab>
+  <Tab title="Windows">
+
+```bat
+set SPANNER_EMULATOR_HOST=localhost:9010
+```
+
+  </Tab>
+  <Tab title="Docker">
+
+```bash
+# Start the emulator
+docker run -d -p 9010:9010 -p 9020:9020 \
+  gcr.io/cloud-spanner-emulator/emulator
+
+# Point the client at it
+export SPANNER_EMULATOR_HOST=localhost:9010
+```
+
+  </Tab>
+</Tabs>
+
+When `SPANNER_EMULATOR_HOST` is set, the client connects to the emulator instead of the real Spanner service. Credentials are ignored.
+
+## DataSource configuration
+
+```typescript app-data-source.ts
+import { DataSource } from "typeorm"
+
+export const AppDataSource = new DataSource({
+    type: "spanner",
+    projectId: "my-gcp-project",
+    instanceId: "my-spanner-instance",
+    database: "my-database",
+    synchronize: false,
+    logging: false,
+    entities: ["src/entities/**/*.ts"],
+    migrations: ["src/migrations/**/*.ts"],
+})
+```
+
+<Note>
+  The `projectId`, `instanceId`, and `database` fields together identify the Spanner database. You can also pass `credentials` directly to the DataSource options if you prefer not to use environment variables.
+</Note>
+
+## Connection options
+
+<ParamField path="type" type="string" required>
+  Must be `"spanner"`.
+</ParamField>
+
+<ParamField path="projectId" type="string" required>
+  Google Cloud project ID that contains the Spanner instance.
+</ParamField>
+
+<ParamField path="instanceId" type="string" required>
+  Spanner instance ID within the project.
+</ParamField>
+
+<ParamField path="database" type="string" required>
+  Spanner database name within the instance.
+</ParamField>
+
+## Column types
+
+Spanner supports the following column types:
+
+| Type | Description |
+|---|---|
+| `bool` | Boolean values |
+| `int64` | 64-bit signed integer |
+| `float64` | 64-bit IEEE 754 float |
+| `numeric` | Exact decimal (up to 29 digits, 9 scale) |
+| `string` | Variable-length Unicode string |
+| `json` | JSON document |
+| `bytes` | Variable-length binary data |
+| `date` | Calendar date (`YYYY-MM-DD`) |
+| `timestamp` | UTC timestamp with microsecond precision |
+| `array` | Ordered list of any supported non-array type |
+
+```typescript
+import { Entity, PrimaryGeneratedColumn, Column } from "typeorm"
+
+@Entity()
+export class Event {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    @Column("string")
+    name: string
+
+    @Column("timestamp")
+    occurredAt: Date
+
+    @Column("json", { nullable: true })
+    metadata: Record<string, unknown> | null
+
+    @Column("array", { array: true })
+    tags: string[]
+}
+```
+
+## Limitations and notes
+
+<Warning>
+  Spanner does not support all SQL features available in PostgreSQL or MySQL. The following limitations apply when using TypeORM with Spanner:
+</Warning>
+
+<AccordionGroup>
+  <Accordion title="No auto-increment primary keys">
+    Spanner does not support auto-incrementing integer primary keys at the database level. Use `@PrimaryGeneratedColumn("uuid")` or generate keys in application code. Sequential integer keys cause hotspots in Spanner's distributed architecture.
+  </Accordion>
+  <Accordion title="Limited DDL in transactions">
+    Spanner executes DDL statements (schema changes) outside of read/write transactions. Migrations that mix DML and DDL in a single transaction will fail.
+  </Accordion>
+  <Accordion title="No foreign key enforcement by default">
+    Spanner supports foreign keys since version 1, but they are not enforced by default in all configurations. Verify your instance's foreign key settings.
+  </Accordion>
+  <Accordion title="Mutations vs. DML">
+    Spanner has two write APIs: mutations (more efficient) and DML (`INSERT`/`UPDATE`/`DELETE` statements). TypeORM uses DML. For high-throughput bulk writes, consider using the Spanner client library directly.
+  </Accordion>
+  <Accordion title="Timestamp precision">
+    Spanner `timestamp` columns store values in UTC at microsecond precision. JavaScript `Date` objects have millisecond precision. Microsecond values are truncated when round-tripping through `Date`.
+  </Accordion>
+  <Accordion title="Interleaved tables">
+    Spanner's interleaved table feature (for co-locating parent and child rows) is not supported through TypeORM's entity/relation model.
+  </Accordion>
+</AccordionGroup>

@@ -1,0 +1,342 @@
+---
+title: "Microsoft SQL Server"
+description: "Connect TypeORM to Microsoft SQL Server and Azure SQL using the mssql driver. Covers Windows Authentication, connection pooling, MssqlParameter, OUTPUT clause, and vector similarity search."
+---
+
+TypeORM supports Microsoft SQL Server and Azure SQL through the `mssql` package, which uses the `tedious` driver under the hood.
+
+## Installation
+
+<CodeGroup>
+
+```bash npm
+npm install mssql
+```
+
+```bash yarn
+yarn add mssql
+```
+
+```bash pnpm
+pnpm add mssql
+```
+
+</CodeGroup>
+
+## DataSource configuration
+
+<Tabs>
+  <Tab title="SQL Server">
+
+```typescript app-data-source.ts
+import { DataSource } from "typeorm"
+
+export const AppDataSource = new DataSource({
+    type: "mssql",
+    host: "localhost",
+    port: 1433,
+    username: "myuser",
+    password: "mypassword",
+    database: "mydb",
+    schema: "dbo",
+    connectionTimeout: 15000,
+    requestTimeout: 15000,
+    options: {
+        encrypt: true,
+        trustServerCertificate: false,
+        enableAnsiNullDefault: true,
+    },
+    pool: {
+        max: 10,
+        min: 0,
+        idleTimeoutMillis: 30000,
+    },
+    synchronize: false,
+    logging: false,
+    entities: ["src/entities/**/*.ts"],
+    migrations: ["src/migrations/**/*.ts"],
+})
+```
+
+  </Tab>
+  <Tab title="Azure SQL">
+
+```typescript app-data-source.ts
+import { DataSource } from "typeorm"
+
+export const AppDataSource = new DataSource({
+    type: "mssql",
+    host: "myserver.database.windows.net",
+    port: 1433,
+    username: "myuser",
+    password: "mypassword",
+    database: "mydb",
+    options: {
+        encrypt: true,
+        trustServerCertificate: false,
+    },
+    entities: ["src/entities/**/*.ts"],
+})
+```
+
+  </Tab>
+  <Tab title="Windows Authentication">
+
+```typescript app-data-source.ts
+import { DataSource } from "typeorm"
+
+export const AppDataSource = new DataSource({
+    type: "mssql",
+    host: "localhost",
+    database: "mydb",
+    domain: "MYDOMAIN",
+    username: "myuser",
+    password: "mypassword",
+    options: {
+        encrypt: false,
+        enableAnsiNullDefault: true,
+    },
+    entities: ["src/entities/**/*.ts"],
+})
+```
+
+  </Tab>
+  <Tab title="Replication">
+
+```typescript app-data-source.ts
+import { DataSource } from "typeorm"
+
+export const AppDataSource = new DataSource({
+    type: "mssql",
+    replication: {
+        master: {
+            host: "primary.db.example.com",
+            port: 1433,
+            username: "myuser",
+            password: "mypassword",
+            database: "mydb",
+        },
+        slaves: [
+            {
+                host: "replica1.db.example.com",
+                port: 1433,
+                username: "myuser",
+                password: "mypassword",
+                database: "mydb",
+            },
+        ],
+        defaultMode: "slave",
+    },
+    entities: ["src/entities/**/*.ts"],
+})
+```
+
+  </Tab>
+</Tabs>
+
+## Connection options
+
+<ParamField path="type" type="string" required>
+  Must be `"mssql"`.
+</ParamField>
+
+<ParamField path="host" type="string">
+  Hostname or IP address of the SQL Server instance.
+</ParamField>
+
+<ParamField path="port" type="number" default="1433">
+  TCP port the server listens on.
+</ParamField>
+
+<ParamField path="username" type="string">
+  SQL Server login name.
+</ParamField>
+
+<ParamField path="password" type="string">
+  SQL Server password.
+</ParamField>
+
+<ParamField path="database" type="string">
+  Database name.
+</ParamField>
+
+<ParamField path="schema" type="string" default="'dbo'">
+  Default schema for queries.
+</ParamField>
+
+<ParamField path="domain" type="string">
+  Active Directory domain. When set, the driver connects using Windows Authentication (NTLM).
+</ParamField>
+
+<ParamField path="connectionTimeout" type="number" default="15000">
+  Milliseconds before the initial connection attempt times out.
+</ParamField>
+
+<ParamField path="requestTimeout" type="number" default="15000">
+  Milliseconds before an individual query times out. The `msnodesqlv8` driver does not support values below 1000 ms.
+</ParamField>
+
+<ParamField path="stream" type="boolean" default="false">
+  Stream rows rather than buffering the full result set. Set to `true` when working with large result sets.
+</ParamField>
+
+<ParamField path="pool" type="object">
+  Connection pool settings.
+
+  <Expandable title="pool properties">
+    <ParamField path="pool.max" type="number" default="10">
+      Maximum connections in the pool.
+    </ParamField>
+    <ParamField path="pool.min" type="number" default="0">
+      Minimum connections kept alive.
+    </ParamField>
+    <ParamField path="pool.acquireTimeoutMillis" type="number">
+      Milliseconds to wait for a free connection before timing out.
+    </ParamField>
+    <ParamField path="pool.idleTimeoutMillis" type="number" default="30000">
+      Milliseconds before an idle connection is eligible for eviction.
+    </ParamField>
+    <ParamField path="pool.evictionRunIntervalMillis" type="number" default="0">
+      How often to run eviction checks. `0` disables eviction.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField path="options" type="object">
+  Driver-level options forwarded to `tedious`.
+
+  <Expandable title="options properties">
+    <ParamField path="options.encrypt" type="boolean" default="true">
+      Encrypt the connection. Required for Azure SQL and recommended for all production deployments.
+    </ParamField>
+    <ParamField path="options.trustServerCertificate" type="boolean" default="false">
+      Skip server certificate validation. Use only for development with self-signed certificates.
+    </ParamField>
+    <ParamField path="options.instanceName" type="string">
+      Named SQL Server instance. Mutually exclusive with `port`. Requires the SQL Server Browser service and UDP port 1434.
+    </ParamField>
+    <ParamField path="options.enableAnsiNullDefault" type="boolean" default="true">
+      Execute `SET ANSI_NULL_DFLT_ON ON` on connect, making new columns nullable by default.
+    </ParamField>
+    <ParamField path="options.abortTransactionOnError" type="boolean">
+      Automatically roll back transactions on any error (`SET XACT_ABORT ON`).
+    </ParamField>
+    <ParamField path="options.isolation" type="string" default="'READ_COMMITTED'">
+      Default isolation level for transactions: `READ_UNCOMMITTED`, `READ_COMMITTED`, `REPEATABLE_READ`, `SERIALIZABLE`, or `SNAPSHOT`.
+    </ParamField>
+    <ParamField path="options.disableOutputReturning" type="boolean">
+      Disable `OUTPUT` / `RETURNING` clauses in INSERT and UPDATE statements.
+    </ParamField>
+    <ParamField path="options.fallbackToDefaultDb" type="boolean" default="false">
+      Fall back to the user's default database when the requested database is inaccessible.
+    </ParamField>
+    <ParamField path="options.appName" type="string" default="'node-mssql'">
+      Application name visible in SQL Server profiling and tracing tools.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+## Column types
+
+`int`, `bigint`, `bit`, `decimal`, `money`, `numeric`, `smallint`, `smallmoney`, `tinyint`, `float`, `real`, `date`, `datetime2`, `datetime`, `datetimeoffset`, `smalldatetime`, `time`, `char`, `varchar`, `text`, `nchar`, `nvarchar`, `ntext`, `binary`, `image`, `varbinary`, `hierarchyid`, `sql_variant`, `timestamp`, `uniqueidentifier`, `xml`, `geometry`, `geography`, `rowversion`, `vector`
+
+## MssqlParameter
+
+SQL Server requires explicit type information for query parameters. Use `MssqlParameter` to specify the type when the inferred type is insufficient:
+
+```typescript
+import { MssqlParameter } from "typeorm"
+
+// Explicitly typed parameters
+await dataSource.query(
+    "INSERT INTO products (name, price, embedding) VALUES (@0, @1, @2)",
+    [
+        new MssqlParameter("Widget", "nvarchar", 100),
+        new MssqlParameter(19.99, "decimal", 10, 2),
+        new MssqlParameter(JSON.stringify([0.1, 0.2, 0.3]), "vector", 3),
+    ]
+)
+```
+
+The `MssqlParameter` constructor signature is:
+
+```typescript
+new MssqlParameter(value, type, ...params)
+```
+
+Supported types include: `bit`, `bigint`, `decimal`, `float`, `int`, `money`, `numeric`, `smallint`, `smallmoney`, `real`, `tinyint`, `char`, `nchar`, `text`, `ntext`, `varchar`, `nvarchar`, `xml`, `time`, `date`, `datetime`, `datetime2`, `datetimeoffset`, `smalldatetime`, `uniqueidentifier`, `binary`, `varbinary`, `image`, `udt`, `geography`, `geometry`, `rowversion`, `vector`.
+
+## Schema support
+
+SQL Server supports multiple schemas within a database. Set the default schema for an entity or globally:
+
+```typescript
+// Global default schema in DataSource
+const AppDataSource = new DataSource({
+    type: "mssql",
+    schema: "sales",
+    // ...
+})
+
+// Per-entity schema
+@Entity({ schema: "hr" })
+export class Employee {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    @Column()
+    name: string
+}
+```
+
+## Vector type
+
+SQL Server supports the `vector` column type for high-dimensional vector storage (AI embeddings, semantic search):
+
+```typescript
+@Entity()
+export class DocumentChunk {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    @Column("varchar")
+    content: string
+
+    @Column("vector", { length: 1536 })
+    embedding: number[]
+}
+```
+
+Use `VECTOR_DISTANCE` for similarity queries:
+
+```typescript
+const queryEmbedding = [/* 1536-dimensional float array */]
+
+const results = await dataSource.query(
+    `
+    DECLARE @q AS VECTOR(1536) = @0;
+    SELECT TOP(10) dc.*,
+           VECTOR_DISTANCE('cosine', @q, embedding) AS distance
+    FROM document_chunk dc
+    ORDER BY VECTOR_DISTANCE('cosine', @q, embedding)
+    `,
+    [JSON.stringify(queryEmbedding)]
+)
+```
+
+Supported distance metrics: `'cosine'`, `'euclidean'`, `'dot'`.
+
+<Note>
+  `halfvec` is not yet supported because the SQL Server implementation is still in preview. See [Vector data type](https://learn.microsoft.com/en-us/sql/t-sql/data-types/vector-data-type) in the Microsoft documentation.
+</Note>
+
+## Limitations and notes
+
+<Warning>
+  Azure SQL requires `options.encrypt: true`. Connections without encryption are rejected. For local development with a self-signed certificate, set `options.trustServerCertificate: true`.
+</Warning>
+
+- Windows Authentication (`domain`) requires that the Node.js process runs on a Windows host joined to the same Active Directory domain as the SQL Server.
+- The `OUTPUT` clause is used by TypeORM for `INSERT` and `UPDATE` returning statements. Set `options.disableOutputReturning: true` if your SQL Server version or edition does not support it.
+- Named instances (`options.instanceName`) require the SQL Server Browser service to be running and UDP 1434 to be accessible.
+- `pool.max` and `pool.min` control the size of the underlying connection pool managed by `mssql`.

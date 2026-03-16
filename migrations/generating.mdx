@@ -1,0 +1,184 @@
+---
+title: "Generating migrations"
+description: "Auto-generate migration files by diffing your entity definitions against the live database schema."
+---
+
+TypeORM can compare your entity definitions to the current database schema and generate a migration file containing only the SQL needed to bring the database up to date. This is the fastest way to create migrations for routine entity changes.
+
+## Basic usage
+
+```bash
+npx typeorm-ts-node-commonjs migration:generate -d <path/to/datasource> <migration-name>
+```
+
+The `-d` argument must point to the file that exports your `DataSource` instance. The final positional argument is the name (or full path) for the new migration.
+
+<Steps>
+  <Step title="Make changes to your entities">
+    Edit your entity classes—add columns, rename properties, change types, add indexes, etc.
+  </Step>
+  <Step title="Run migration:generate">
+    ```bash
+    npx typeorm-ts-node-commonjs migration:generate -d src/data-source.ts src/migrations/post-refactoring
+    ```
+    TypeORM connects to the database, introspects the live schema, compares it to your entities, and writes the diff as SQL.
+  </Step>
+  <Step title="Review the generated file">
+    Always open and read the generated migration before running it. Auto-generation is accurate but you should understand what will be executed.
+  </Step>
+  <Step title="Run the migration">
+    ```bash
+    npx typeorm-ts-node-commonjs migration:run -d src/data-source.ts
+    ```
+  </Step>
+</Steps>
+
+## Example output
+
+After renaming `title` to `name` on a `Post` entity, the generated file looks like:
+
+```typescript src/migrations/1699000000000-post-refactoring.ts
+import { MigrationInterface, QueryRunner } from "typeorm";
+
+export class PostRefactoring1699000000000 implements MigrationInterface {
+    name = 'PostRefactoring1699000000000'
+
+    public async up(queryRunner: QueryRunner): Promise<void> {
+        await queryRunner.query(`ALTER TABLE "post" ALTER COLUMN "title" RENAME TO "name"`);
+    }
+
+    public async down(queryRunner: QueryRunner): Promise<void> {
+        await queryRunner.query(`ALTER TABLE "post" ALTER COLUMN "name" RENAME TO "title"`);
+    }
+}
+```
+
+<Note>
+  If TypeORM detects no differences between your entities and the live schema, the command exits with code `1` and no file is written.
+</Note>
+
+## CLI flags
+
+<ParamField path="-d, --dataSource" type="string" required>
+  Path to the file exporting your `DataSource` instance.
+</ParamField>
+
+<ParamField path="-p, --pretty" type="boolean" default="false">
+  Format the generated SQL queries with multi-line indentation for readability.
+</ParamField>
+
+<ParamField path="-o, --outputJs" type="boolean" default="false">
+  Write the migration as a JavaScript file instead of TypeScript. Useful for JavaScript-only projects.
+</ParamField>
+
+<ParamField path="--esm" type="boolean" default="false">
+  When used with `--outputJs`, generate ESM (`export class`) syntax instead of CommonJS (`module.exports =`).
+</ParamField>
+
+<ParamField path="-dr, --dryrun" type="boolean" default="false">
+  Print the migration content to stdout without writing a file. Use this to preview what would be generated.
+</ParamField>
+
+<ParamField path="-ch, --check" type="boolean" default="false">
+  Exit with code `1` if there are schema differences (i.e., migrations are needed). Exit with code `0` if the schema is up to date. Useful in CI to assert that all migrations have been committed.
+</ParamField>
+
+<ParamField path="-t, --timestamp" type="number">
+  Override the timestamp used in the migration filename and class name. Must be a non-negative integer.
+</ParamField>
+
+## JavaScript output formats
+
+<Tabs>
+  <Tab title="TypeScript (default)">
+    ```typescript
+    import { MigrationInterface, QueryRunner } from "typeorm";
+
+    export class PostRefactoring1699000000000 implements MigrationInterface {
+        name = 'PostRefactoring1699000000000'
+
+        public async up(queryRunner: QueryRunner): Promise<void> {
+            await queryRunner.query(`ALTER TABLE "post" ALTER COLUMN "title" RENAME TO "name"`);
+        }
+
+        public async down(queryRunner: QueryRunner): Promise<void> {
+            await queryRunner.query(`ALTER TABLE "post" ALTER COLUMN "name" RENAME TO "title"`);
+        }
+    }
+    ```
+  </Tab>
+  <Tab title="JavaScript (CommonJS)">
+    ```javascript
+    /**
+     * @typedef {import('typeorm').MigrationInterface} MigrationInterface
+     * @typedef {import('typeorm').QueryRunner} QueryRunner
+     */
+
+    /**
+     * @class
+     * @implements {MigrationInterface}
+     */
+    module.exports = class PostRefactoring1699000000000 {
+        name = 'PostRefactoring1699000000000'
+
+        /**
+         * @param {QueryRunner} queryRunner
+         */
+        async up(queryRunner) {
+            await queryRunner.query(`ALTER TABLE "post" ALTER COLUMN "title" RENAME TO "name"`);
+        }
+
+        /**
+         * @param {QueryRunner} queryRunner
+         */
+        async down(queryRunner) {
+            await queryRunner.query(`ALTER TABLE "post" ALTER COLUMN "name" RENAME TO "title"`);
+        }
+    }
+    ```
+  </Tab>
+  <Tab title="JavaScript (ESM)">
+    ```javascript
+    /**
+     * @typedef {import('typeorm').MigrationInterface} MigrationInterface
+     * @typedef {import('typeorm').QueryRunner} QueryRunner
+     */
+
+    /**
+     * @class
+     * @implements {MigrationInterface}
+     */
+    export class PostRefactoring1699000000000 {
+        name = 'PostRefactoring1699000000000'
+
+        /**
+         * @param {QueryRunner} queryRunner
+         */
+        async up(queryRunner) {
+            await queryRunner.query(`ALTER TABLE "post" ALTER COLUMN "title" RENAME TO "name"`);
+        }
+
+        /**
+         * @param {QueryRunner} queryRunner
+         */
+        async down(queryRunner) {
+            await queryRunner.query(`ALTER TABLE "post" ALTER COLUMN "name" RENAME TO "title"`);
+        }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Naming convention
+
+Generate a migration after **each** change you make to your entities. Keeping migrations small and focused on a single change makes them easier to review and revert.
+
+```bash
+# Good: one migration per logical change
+npx typeorm-ts-node-commonjs migration:generate -d src/data-source.ts src/migrations/add-user-email-column
+npx typeorm-ts-node-commonjs migration:generate -d src/data-source.ts src/migrations/add-index-to-user-email
+```
+
+<Warning>
+  Never edit the `up` SQL in a generated migration after it has been applied to any environment. Instead, generate a new migration that corrects the schema.
+</Warning>

@@ -1,0 +1,134 @@
+---
+title: "Extra options"
+description: "Additional migration options including timestamp customization, naming conventions, table configuration, and transaction mode control."
+---
+
+## Custom timestamps
+
+By default, TypeORM uses the current time (`Date.now()`) as the timestamp prefix in migration filenames and class names. You can override this with the `-t` flag (alias `--timestamp`):
+
+```bash
+npx typeorm-ts-node-commonjs migration:generate -d src/data-source.ts -t 1699000000000 src/migrations/my-migration
+npx typeorm-ts-node-commonjs migration:create -t 1699000000000 src/migrations/my-migration
+```
+
+Obtain a timestamp value with:
+
+```javascript
+Date.now()
+// or
+new Date().getTime()
+```
+
+The timestamp must be a non-negative integer.
+
+## Naming conventions
+
+TypeORM migration class names must follow the pattern `{Name}{Timestamp}`. The timestamp is what TypeORM uses to determine order and uniqueness. When using `migration:generate`, this is handled automatically.
+
+For manually created migrations, a consistent naming convention helps readability:
+
+```
+{timestamp}-{verb}-{subject}.ts
+
+Examples:
+1699000000000-add-user-table.ts
+1699000001000-rename-post-title.ts
+1699000002000-add-index-to-email.ts
+```
+
+<Tip>
+  Use imperative verbs in migration names: `add`, `remove`, `rename`, `create`, `drop`, `update`. This makes git history easy to scan.
+</Tip>
+
+## Customizing the migrations table
+
+By default, TypeORM stores migration history in a table named `migrations`. You can change this in your DataSource options:
+
+```typescript
+export default new DataSource({
+    // ...
+    migrationsTableName: "schema_history",
+})
+```
+
+Change this setting before you run any migrations. Changing it after will cause TypeORM to create a new empty table and re-run all migrations.
+
+## Transaction modes
+
+Transaction mode controls how database transactions wrap your migrations. Set it globally on the DataSource or override it per-run with the `--transaction` CLI flag.
+
+<Tabs>
+  <Tab title="all (default)">
+    All pending migrations run inside a single transaction. If one fails, the entire batch is rolled back.
+
+    ```typescript
+    export default new DataSource({
+        migrationsTransactionMode: "all",
+    })
+    ```
+  </Tab>
+  <Tab title="each">
+    Each migration runs in its own transaction. Useful when you need to isolate failures.
+
+    ```typescript
+    export default new DataSource({
+        migrationsTransactionMode: "each",
+    })
+    ```
+  </Tab>
+  <Tab title="none">
+    No transaction wrapping. Necessary for statements that cannot run inside a transaction, such as `CREATE INDEX CONCURRENTLY` on PostgreSQL.
+
+    ```typescript
+    export default new DataSource({
+        migrationsTransactionMode: "none",
+    })
+    ```
+  </Tab>
+</Tabs>
+
+### Per-migration transaction override
+
+In `"each"` or `"none"` mode, you can opt individual migrations in or out of transactions by setting the `transaction` property on the class:
+
+```typescript
+import { MigrationInterface, QueryRunner } from "typeorm"
+
+export class AddConcurrentIndex1699000000000 implements MigrationInterface {
+    transaction = false  // Do not wrap this migration in a transaction
+
+    async up(queryRunner: QueryRunner): Promise<void> {
+        await queryRunner.query(
+            `CREATE INDEX CONCURRENTLY post_names_idx ON post(name)`,
+        )
+    }
+
+    async down(queryRunner: QueryRunner): Promise<void> {
+        await queryRunner.query(`DROP INDEX CONCURRENTLY post_names_idx`)
+    }
+}
+```
+
+<Note>
+  The `transaction` property on a migration class is ignored when `migrationsTransactionMode` is `"all"`.
+</Note>
+
+## Multiple migration sources
+
+You can load migrations from multiple directories or mix explicit classes with glob patterns:
+
+```typescript
+export default new DataSource({
+    migrations: [
+        // Glob patterns
+        __dirname + "/migrations/**/*{.js,.ts}",
+        __dirname + "/module-a/migrations/**/*{.js,.ts}",
+
+        // Explicit classes alongside globs
+        BootstrapMigration,
+    ],
+})
+```
+
+All discovered migrations are sorted by timestamp before execution, regardless of which source they came from.

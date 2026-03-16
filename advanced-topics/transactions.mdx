@@ -1,0 +1,189 @@
+---
+title: Transactions
+description: Use DataSource.transaction(), QueryRunner, isolation levels, savepoints, and nested transactions to manage database transactions in TypeORM.
+---
+
+Transactions ensure a set of database operations either all succeed or all fail together. TypeORM provides two main approaches: a callback-based helper and manual control via `QueryRunner`.
+
+## Using `DataSource.transaction()`
+
+The simplest way to run code in a transaction is to pass a callback to `DataSource.transaction()` or `EntityManager.transaction()`. TypeORM opens the transaction before calling your callback and commits or rolls back automatically.
+
+```typescript
+await myDataSource.transaction(async (transactionalEntityManager) => {
+    await transactionalEntityManager.save(user)
+    await transactionalEntityManager.save(photos)
+})
+```
+
+You can also call it through the `manager` property:
+
+```typescript
+await myDataSource.manager.transaction(async (transactionalEntityManager) => {
+    await transactionalEntityManager.save(users)
+    await transactionalEntityManager.save(photos)
+})
+```
+
+<Warning>
+Always use the `transactionalEntityManager` provided in the callback. Never use the global `EntityManager` or a repository obtained outside the callback — those operate outside the transaction.
+</Warning>
+
+## Specifying an isolation level
+
+Pass an isolation level string as the first argument to set the transaction isolation:
+
+```typescript
+await myDataSource.manager.transaction(
+    "SERIALIZABLE",
+    async (transactionalEntityManager) => {
+        await transactionalEntityManager.save(order)
+    },
+)
+```
+
+<AccordionGroup>
+  <Accordion title="Supported isolation levels by database">
+    The standard four levels (`READ UNCOMMITTED`, `READ COMMITTED`, `REPEATABLE READ`, `SERIALIZABLE`) are supported by:
+
+    - **MySQL**
+    - **PostgreSQL**
+    - **SQL Server**
+
+    **SQLite** defaults to `SERIALIZABLE`. When shared cache mode is enabled, `READ UNCOMMITTED` is also available.
+
+    **Oracle** only supports `READ COMMITTED` and `SERIALIZABLE`.
+  </Accordion>
+</AccordionGroup>
+
+## Manual transactions with `QueryRunner`
+
+When you need fine-grained control — for example, to run schema operations inside a transaction or to implement savepoints — use a `QueryRunner` directly.
+
+<Steps>
+  <Step title="Create and connect the query runner">
+    ```typescript
+    const queryRunner = dataSource.createQueryRunner()
+    await queryRunner.connect()
+    ```
+  </Step>
+  <Step title="Start the transaction">
+    ```typescript
+    await queryRunner.startTransaction()
+    ```
+
+    You can also pass an isolation level:
+
+    ```typescript
+    await queryRunner.startTransaction("READ COMMITTED")
+    ```
+  </Step>
+  <Step title="Execute operations">
+    Use `queryRunner.manager` for all entity operations inside the transaction:
+
+    ```typescript
+    await queryRunner.manager.save(user1)
+    await queryRunner.manager.save(user2)
+    await queryRunner.manager.save(photos)
+    ```
+  </Step>
+  <Step title="Commit or roll back">
+    ```typescript
+    try {
+        await queryRunner.commitTransaction()
+    } catch (err) {
+        await queryRunner.rollbackTransaction()
+        throw err
+    }
+    ```
+  </Step>
+  <Step title="Release the connection">
+    ```typescript
+    await queryRunner.release()
+    ```
+
+    Manually created query runners must always be released to return the connection to the pool.
+  </Step>
+</Steps>
+
+Full example with error handling:
+
+```typescript
+const queryRunner = dataSource.createQueryRunner()
+await queryRunner.connect()
+await queryRunner.startTransaction()
+
+try {
+    await queryRunner.manager.save(user1)
+    await queryRunner.manager.save(user2)
+    await queryRunner.manager.save(photos)
+
+    await queryRunner.commitTransaction()
+} catch (err) {
+    await queryRunner.rollbackTransaction()
+} finally {
+    await queryRunner.release()
+}
+```
+
+## Transaction control methods
+
+| Method | Description |
+|---|---|
+| `startTransaction(isolationLevel?)` | Opens a new transaction. Optionally accepts an isolation level. |
+| `commitTransaction()` | Commits all changes made through this query runner. |
+| `rollbackTransaction()` | Rolls back all changes made through this query runner. |
+
+## Savepoints
+
+Savepoints let you partially roll back a transaction without undoing the entire thing. Use `query()` directly to issue savepoint SQL:
+
+```typescript
+await queryRunner.startTransaction()
+
+try {
+    await queryRunner.manager.save(order)
+
+    // create a savepoint before the risky operation
+    await queryRunner.query("SAVEPOINT order_items_save")
+
+    try {
+        await queryRunner.manager.save(orderItems)
+    } catch (err) {
+        // roll back only to the savepoint, keep the order
+        await queryRunner.query("ROLLBACK TO SAVEPOINT order_items_save")
+    }
+
+    await queryRunner.commitTransaction()
+} catch (err) {
+    await queryRunner.rollbackTransaction()
+} finally {
+    await queryRunner.release()
+}
+```
+
+<Note>
+Savepoints are supported by PostgreSQL, MySQL, MariaDB, and SQL Server. SQLite does not support savepoints.
+</Note>
+
+## Nested transactions
+
+TypeORM does not support true nested transactions natively — calling `startTransaction()` on an already-active query runner will throw. Use savepoints to achieve equivalent behaviour, or open a second `QueryRunner` on a separate connection for a truly independent transaction.
+
+```typescript
+// independent nested transaction on a separate connection
+const innerRunner = dataSource.createQueryRunner()
+await innerRunner.connect()
+await innerRunner.startTransaction()
+
+try {
+    await innerRunner.manager.save(auditLog)
+    await innerRunner.commitTransaction()
+} catch (err) {
+    await innerRunner.rollbackTransaction()
+} finally {
+    await innerRunner.release()
+}
+```
+
+Learn more in [Query Runner](/query-runner).

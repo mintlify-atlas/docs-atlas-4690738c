@@ -1,0 +1,253 @@
+---
+title: "Embedded entities"
+description: "Reuse column groups across multiple entities using embedded classes — a composition-based alternative to inheritance."
+---
+
+## What are embedded entities?
+
+Embedded entities let you define a group of columns once and reuse them across multiple entities. Instead of duplicating properties, you create a plain class with column decorators and embed it using `@Column(() => ClassName)`.
+
+The columns from the embedded class are merged into the parent entity's table — no separate table is created.
+
+## The problem: duplicated columns
+
+Consider three entities that each repeat `firstName` and `lastName`:
+
+<CodeGroup>
+
+```typescript user.entity.ts
+@Entity()
+export class User {
+    @PrimaryGeneratedColumn()
+    id: string
+
+    @Column()
+    firstName: string
+
+    @Column()
+    lastName: string
+
+    @Column()
+    isActive: boolean
+}
+```
+
+```typescript employee.entity.ts
+@Entity()
+export class Employee {
+    @PrimaryGeneratedColumn()
+    id: string
+
+    @Column()
+    firstName: string
+
+    @Column()
+    lastName: string
+
+    @Column()
+    salary: number
+}
+```
+
+```typescript student.entity.ts
+@Entity()
+export class Student {
+    @PrimaryGeneratedColumn()
+    id: string
+
+    @Column()
+    firstName: string
+
+    @Column()
+    lastName: string
+
+    @Column()
+    faculty: string
+}
+```
+
+</CodeGroup>
+
+## Defining an embedded class
+
+Extract the shared columns into a plain class. Note that this class does **not** have `@Entity()` — it is not an entity itself:
+
+```typescript name.ts
+import { Column } from "typeorm"
+
+export class Name {
+    @Column()
+    first: string
+
+    @Column()
+    last: string
+}
+```
+
+## Embedding columns in entities
+
+Use `@Column(() => Name)` to embed the `Name` columns into each entity:
+
+<CodeGroup>
+
+```typescript user.entity.ts
+import { Entity, PrimaryGeneratedColumn, Column } from "typeorm"
+import { Name } from "./Name"
+
+@Entity()
+export class User {
+    @PrimaryGeneratedColumn()
+    id: string
+
+    @Column(() => Name)
+    name: Name
+
+    @Column()
+    isActive: boolean
+}
+```
+
+```typescript employee.entity.ts
+import { Entity, PrimaryGeneratedColumn, Column } from "typeorm"
+import { Name } from "./Name"
+
+@Entity()
+export class Employee {
+    @PrimaryGeneratedColumn()
+    id: string
+
+    @Column(() => Name)
+    name: Name
+
+    @Column()
+    salary: number
+}
+```
+
+```typescript student.entity.ts
+import { Entity, PrimaryGeneratedColumn, Column } from "typeorm"
+import { Name } from "./Name"
+
+@Entity()
+export class Student {
+    @PrimaryGeneratedColumn()
+    id: string
+
+    @Column(() => Name)
+    name: Name
+
+    @Column()
+    faculty: string
+}
+```
+
+</CodeGroup>
+
+## Resulting table structure
+
+Each entity gets the embedded columns merged directly into its own table. TypeORM prefixes the embedded property name onto each column name:
+
+```
++-------------+--------------+----------------------------+
+|                          user                           |
++-------------+--------------+----------------------------+
+| id          | int          | PRIMARY KEY AUTO_INCREMENT |
+| nameFirst   | varchar(255) |                            |
+| nameLast    | varchar(255) |                            |
+| isActive    | boolean      |                            |
++-------------+--------------+----------------------------+
+
++-------------+--------------+----------------------------+
+|                        employee                         |
++-------------+--------------+----------------------------+
+| id          | int          | PRIMARY KEY AUTO_INCREMENT |
+| nameFirst   | varchar(255) |                            |
+| nameLast    | varchar(255) |                            |
+| salary      | int          |                            |
++-------------+--------------+----------------------------+
+
++-------------+--------------+----------------------------+
+|                         student                         |
++-------------+--------------+----------------------------+
+| id          | int          | PRIMARY KEY AUTO_INCREMENT |
+| nameFirst   | varchar(255) |                            |
+| nameLast    | varchar(255) |                            |
+| faculty     | varchar(255) |                            |
++-------------+--------------+----------------------------+
+```
+
+## Accessing embedded properties
+
+Access and assign embedded values through the nested property:
+
+```typescript
+const user = new User()
+user.name = new Name()
+user.name.first = "Alice"
+user.name.last = "Smith"
+user.isActive = true
+
+await dataSource.manager.save(user)
+
+// Query by embedded property
+const found = await dataSource.getRepository(User).findOneBy({
+    name: { first: "Alice", last: "Smith" },
+})
+
+console.log(found.name.first) // "Alice"
+```
+
+## Controlling the column prefix
+
+By default, TypeORM prepends the embedded property name to all column names (e.g., `nameFirst`, `nameLast`). You can override this with the `prefix` option:
+
+```typescript
+// Custom prefix
+@Column(() => Name, { prefix: "user_" })
+name: Name
+// Produces: user_first, user_last
+
+// No prefix
+@Column(() => Name, { prefix: false })
+name: Name
+// Produces: first, last
+```
+
+<Warning>
+  Disabling the prefix (`prefix: false`) on two embedded properties of the same type in one entity will cause column name conflicts.
+</Warning>
+
+## Nested embeds
+
+Embedded classes can themselves contain embedded columns:
+
+```typescript address.ts
+import { Column } from "typeorm"
+import { City } from "./City"
+
+export class Address {
+    @Column()
+    street: string
+
+    @Column(() => City)
+    city: City
+}
+```
+
+```typescript person.entity.ts
+import { Entity, PrimaryGeneratedColumn, Column } from "typeorm"
+import { Address } from "./Address"
+
+@Entity()
+export class Person {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    @Column(() => Address)
+    address: Address
+}
+```
+
+<Tip>
+  Embedded classes can also include relation decorators (`@ManyToOne`, `@OneToMany`, etc.), not just column decorators.
+</Tip>

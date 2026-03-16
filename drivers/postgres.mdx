@@ -1,0 +1,393 @@
+---
+title: "PostgreSQL"
+description: "Connect TypeORM to PostgreSQL, CockroachDB, and Aurora PostgreSQL using the pg driver. Covers SSL, connection pooling, replication, spatial types, and vector search."
+---
+
+TypeORM supports PostgreSQL, CockroachDB, and Amazon Aurora PostgreSQL through the `pg` Node.js driver. Databases that are wire-compatible with PostgreSQL can also use the `postgres` data source type.
+
+<Note>
+  For YugabyteDB, follow [their TypeORM guide](https://docs.yugabyte.com/stable/drivers-orms/nodejs/typeorm/). Some TypeORM functionality may be limited because certain PostgreSQL features are [not supported](https://docs.yugabyte.com/stable/develop/postgresql-compatibility/#unsupported-postgresql-features) by YugabyteDB.
+</Note>
+
+## Installation
+
+<CodeGroup>
+
+```bash npm
+npm install pg
+```
+
+```bash yarn
+yarn add pg
+```
+
+```bash pnpm
+pnpm add pg
+```
+
+</CodeGroup>
+
+For native bindings (faster but requires compilation):
+
+<CodeGroup>
+
+```bash npm
+npm install pg-native
+```
+
+```bash yarn
+yarn add pg-native
+```
+
+```bash pnpm
+pnpm add pg-native
+```
+
+</CodeGroup>
+
+For streaming large result sets:
+
+<CodeGroup>
+
+```bash npm
+npm install pg-query-stream
+```
+
+```bash yarn
+yarn add pg-query-stream
+```
+
+```bash pnpm
+pnpm add pg-query-stream
+```
+
+</CodeGroup>
+
+## DataSource configuration
+
+<Tabs>
+  <Tab title="PostgreSQL">
+
+```typescript app-data-source.ts
+import { DataSource } from "typeorm"
+
+export const AppDataSource = new DataSource({
+    type: "postgres",
+    host: "localhost",
+    port: 5432,
+    username: "myuser",
+    password: "mypassword",
+    database: "mydb",
+    schema: "public",
+    ssl: {
+        rejectUnauthorized: true,
+        ca: fs.readFileSync("server-ca.pem").toString(),
+    },
+    uuidExtension: "pgcrypto",
+    installExtensions: true,
+    logNotifications: false,
+    connectTimeoutMS: 10000,
+    parseInt8: false,
+    applicationName: "my-app",
+    synchronize: false,
+    logging: false,
+    entities: ["src/entities/**/*.ts"],
+    migrations: ["src/migrations/**/*.ts"],
+    poolSize: 10,
+})
+```
+
+  </Tab>
+  <Tab title="CockroachDB">
+
+```typescript app-data-source.ts
+import { DataSource } from "typeorm"
+
+export const AppDataSource = new DataSource({
+    type: "cockroachdb",
+    host: "free-tier.gcp-us-central1.cockroachlabs.cloud",
+    port: 26257,
+    username: "myuser",
+    password: "mypassword",
+    database: "defaultdb",
+    ssl: true,
+    synchronize: false,
+    entities: ["src/entities/**/*.ts"],
+    migrations: ["src/migrations/**/*.ts"],
+})
+```
+
+  </Tab>
+  <Tab title="Replication">
+
+```typescript app-data-source.ts
+import { DataSource } from "typeorm"
+
+export const AppDataSource = new DataSource({
+    type: "postgres",
+    replication: {
+        master: {
+            host: "primary.db.example.com",
+            port: 5432,
+            username: "myuser",
+            password: "mypassword",
+            database: "mydb",
+        },
+        slaves: [
+            {
+                host: "replica1.db.example.com",
+                port: 5432,
+                username: "myuser",
+                password: "mypassword",
+                database: "mydb",
+            },
+        ],
+        defaultMode: "slave",
+    },
+    entities: ["src/entities/**/*.ts"],
+})
+```
+
+  </Tab>
+</Tabs>
+
+## Connection options
+
+<ParamField path="type" type="string" required>
+  Must be `"postgres"`, `"cockroachdb"`, or `"aurora-postgres"`.
+</ParamField>
+
+<ParamField path="host" type="string" default="'localhost'">
+  Hostname or IP address of the PostgreSQL server.
+</ParamField>
+
+<ParamField path="port" type="number" default="5432">
+  TCP port the server listens on.
+</ParamField>
+
+<ParamField path="username" type="string">
+  Database user.
+</ParamField>
+
+<ParamField path="password" type="string | () => string | () => Promise<string>">
+  Database password. Accepts a plain string, a synchronous function, or an async function returning the password at connection time.
+</ParamField>
+
+<ParamField path="database" type="string">
+  Database name.
+</ParamField>
+
+<ParamField path="schema" type="string" default="'public'">
+  Schema to use for all queries. Defaults to `public`.
+</ParamField>
+
+<ParamField path="url" type="string">
+  Full connection URL (e.g. `postgres://user:pass@host:5432/db`). Individual options override URL components when both are provided.
+</ParamField>
+
+<ParamField path="ssl" type="boolean | TlsOptions">
+  Pass `true` to enable SSL with default settings, or a `TlsOptions` object for full control. See [node-postgres SSL docs](https://node-postgres.com/features/ssl).
+</ParamField>
+
+<ParamField path="uuidExtension" type="'pgcrypto' | 'uuid-ossp'" default="'uuid-ossp'">
+  PostgreSQL extension used for UUID generation. Use `"pgcrypto"` when `uuid-ossp` is unavailable.
+</ParamField>
+
+<ParamField path="installExtensions" type="boolean" default="true">
+  Automatically install required PostgreSQL extensions on connection.
+</ParamField>
+
+<ParamField path="extensions" type="string[]">
+  Additional PostgreSQL extensions to install (e.g. `["pgcrypto", "postgis"]`).
+</ParamField>
+
+<ParamField path="connectTimeoutMS" type="number">
+  Milliseconds to wait before the initial connection attempt times out. `0` or `undefined` means no timeout.
+</ParamField>
+
+<ParamField path="parseInt8" type="boolean" default="false">
+  Parse `int8` / `bigint` columns as JavaScript `number` instead of `string`. Safe only for values within `Number.MAX_SAFE_INTEGER`.
+</ParamField>
+
+<ParamField path="logNotifications" type="boolean" default="false">
+  Include PostgreSQL server notice messages and `NOTIFY` events in client logs.
+</ParamField>
+
+<ParamField path="maxTransactionRetries" type="number" default="5">
+  Maximum retry attempts when a transaction fails with error code `40001` (serialization failure).
+</ParamField>
+
+<ParamField path="applicationName" type="string">
+  Value set as the `application_name` connection parameter. Appears in `pg_stat_activity` and server logs.
+</ParamField>
+
+<ParamField path="poolErrorHandler" type="(err: Error) => void">
+  Called when the underlying `pg` pool emits an `error` event. Defaults to a `warn`-level log.
+</ParamField>
+
+<ParamField path="extra" type="object">
+  Passed directly to the `pg` `Pool` or `Client` constructor. Use for options not exposed at the top level. See the [pg Pool API](https://node-postgres.com/apis/pool) and [Client API](https://node-postgres.com/apis/client).
+</ParamField>
+
+## PostgreSQL-specific column types
+
+TypeORM supports the full range of PostgreSQL native types:
+
+| Category | Types |
+|---|---|
+| Integer | `int2`, `int4`, `int8`, `smallint`, `integer`, `bigint` |
+| Floating point | `real`, `float4`, `float8`, `double precision`, `numeric`, `decimal`, `money` |
+| Text | `character varying`, `varchar`, `character`, `char`, `text`, `citext` |
+| Binary | `bytea` |
+| Boolean | `boolean`, `bool` |
+| Date/time | `date`, `time`, `timetz`, `timestamp`, `timestamptz`, `interval` |
+| UUID | `uuid` |
+| JSON | `json`, `jsonb`, `jsonpath` |
+| Network | `cidr`, `inet`, `macaddr`, `macaddr8` |
+| Geometry | `point`, `line`, `lseg`, `box`, `path`, `polygon`, `circle` |
+| Ranges | `int4range`, `int8range`, `numrange`, `tsrange`, `tstzrange`, `daterange` |
+| Multiranges | `int4multirange`, `int8multirange`, `nummultirange`, `tsmultirange`, `tstzmultirange`, `multidaterange` |
+| Full-text search | `tsvector`, `tsquery` |
+| Spatial (PostGIS) | `geometry`, `geography` |
+| Other | `hstore`, `xml`, `enum`, `bit`, `varbit`, `cube`, `ltree`, `vector`, `halfvec` |
+
+### JSON and JSONB
+
+```typescript
+import { Entity, PrimaryGeneratedColumn, Column } from "typeorm"
+
+@Entity()
+export class Event {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    @Column("jsonb")
+    metadata: Record<string, unknown>
+
+    @Column({ type: "json", nullable: true })
+    rawPayload: object | null
+}
+```
+
+### UUID primary keys
+
+```typescript
+import { Entity, PrimaryGeneratedColumn, Column } from "typeorm"
+
+@Entity()
+export class Product {
+    @PrimaryGeneratedColumn("uuid")
+    id: string
+
+    @Column()
+    name: string
+}
+```
+
+### Spatial columns (PostGIS)
+
+TypeORM uses GeoJSON as the interchange format for geometry columns. Import geometry types from `typeorm` or from `@types/geojson`.
+
+```typescript
+import { Entity, PrimaryGeneratedColumn, Column, Point, LineString } from "typeorm"
+
+@Entity()
+export class Route {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    @Column("geometry")
+    startPoint: Point
+
+    @Column("geometry")
+    path: LineString
+
+    @Column("geometry", { spatialFeatureType: "MultiPoint", srid: 4326 })
+    waypoints: object
+}
+```
+
+### Vector columns (pgvector)
+
+Vector columns require the `pgvector` extension. Use the `vector` or `halfvec` types and query with PostgreSQL's vector distance operators:
+
+```typescript
+// L2 (Euclidean) distance
+const nearest = await dataSource.sql`
+    SELECT id, embedding
+    FROM post
+    ORDER BY embedding <-> ${"[1,2,3]"}
+    LIMIT 5`
+
+// Cosine distance
+const nearest = await dataSource.sql`
+    SELECT id, embedding
+    FROM post
+    ORDER BY embedding <=> ${"[1,2,3]"}
+    LIMIT 5`
+
+// Inner product
+const nearest = await dataSource.sql`
+    SELECT id, embedding
+    FROM post
+    ORDER BY embedding <#> ${"[1,2,3]"}
+    LIMIT 5`
+```
+
+## CockroachDB notes
+
+<Note>
+  CockroachDB returns all numeric data types as `string`. If you omit the column type and define your property as `number`, TypeORM will call `parseInt` on the returned string automatically.
+</Note>
+
+Supported CockroachDB types: `array`, `bool`, `boolean`, `bytes`, `bytea`, `blob`, `date`, `numeric`, `decimal`, `dec`, `float`, `float4`, `float8`, `double precision`, `real`, `inet`, `int`, `integer`, `int2`, `int8`, `int64`, `smallint`, `bigint`, `interval`, `string`, `character varying`, `character`, `char`, `char varying`, `varchar`, `text`, `time`, `timestamp`, `timestamptz`, `json`, `jsonb`, `uuid`.
+
+## Connection pooling
+
+TypeORM uses `pg`'s built-in connection pool. Control pool size with `poolSize` (common option) or fine-tune via `extra`:
+
+```typescript
+const AppDataSource = new DataSource({
+    type: "postgres",
+    // ...
+    poolSize: 20,
+    extra: {
+        idleTimeoutMillis: 30000,
+        connectionTimeoutMillis: 2000,
+    },
+})
+```
+
+## SSL configuration
+
+```typescript
+import fs from "fs"
+
+const AppDataSource = new DataSource({
+    type: "postgres",
+    host: "db.example.com",
+    port: 5432,
+    username: "myuser",
+    password: "mypassword",
+    database: "mydb",
+    ssl: {
+        rejectUnauthorized: true,
+        ca: fs.readFileSync("server-ca.pem").toString(),
+        key: fs.readFileSync("client-key.pem").toString(),
+        cert: fs.readFileSync("client-cert.pem").toString(),
+    },
+})
+```
+
+For managed databases that use self-signed certificates (e.g. Heroku), set `rejectUnauthorized: false`. Do not use this in production with untrusted certificates.
+
+## Limitations and notes
+
+<Warning>
+  The `pg-native` binding requires native compilation tools (`node-gyp`, `libpq`). It is faster than the pure-JS `pg` driver but adds a build-time dependency. Most deployments use the default `pg` driver.
+</Warning>
+
+- `pg-query-stream` is required for streaming queries. Without it, TypeORM loads all rows into memory before returning results.
+- The `maxTransactionRetries` option only handles serialization failures (error code `40001`). Other errors are not retried automatically.
+- Schema migrations run under the schema specified in `schema`. Make sure the connected user has `CREATE` privileges on that schema.
+- The `extensions` option installs extensions at DataSource initialization time. The connected user needs `CREATE EXTENSION` privileges (usually a superuser).

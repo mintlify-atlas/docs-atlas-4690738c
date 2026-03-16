@@ -1,0 +1,239 @@
+---
+title: "SAP HANA"
+description: "Connect TypeORM to SAP HANA using the @sap/hana-client driver. Covers connection options, connection pooling, SSL, vector types, and SAP HANA-specific column types."
+---
+
+TypeORM supports SAP HANA 2.0 and SAP HANA Cloud through the `@sap/hana-client` Node.js driver.
+
+## Installation
+
+<CodeGroup>
+
+```bash npm
+npm install @sap/hana-client
+```
+
+```bash yarn
+yarn add @sap/hana-client
+```
+
+```bash pnpm
+pnpm add @sap/hana-client
+```
+
+</CodeGroup>
+
+<Note>
+  If you are using TypeORM 0.3.25 or earlier, also install `hdb-pool` for connection pool management: `npm install hdb-pool`. From TypeORM 0.3.26 onward, `hdb-pool` is no longer required.
+</Note>
+
+## DataSource configuration
+
+<Tabs>
+  <Tab title="Basic connection">
+
+```typescript app-data-source.ts
+import { DataSource } from "typeorm"
+
+export const AppDataSource = new DataSource({
+    type: "sap",
+    host: "hana-host.example.com",
+    port: 30015,
+    username: "SYSTEM",
+    password: "mypassword",
+    database: "HXE",
+    synchronize: false,
+    logging: false,
+    entities: ["src/entities/**/*.ts"],
+    migrations: ["src/migrations/**/*.ts"],
+})
+```
+
+  </Tab>
+  <Tab title="SSL">
+
+```typescript app-data-source.ts
+import { DataSource } from "typeorm"
+
+export const AppDataSource = new DataSource({
+    type: "sap",
+    host: "hana-host.example.com",
+    port: 30015,
+    username: "SYSTEM",
+    password: "mypassword",
+    database: "HXE",
+    encrypt: true,
+    sslValidateCertificate: true,
+    ca: "/path/to/ca.pem",
+    cert: "/path/to/client-cert.pem",
+    key: "/path/to/client-key.pem",
+    entities: ["src/entities/**/*.ts"],
+})
+```
+
+  </Tab>
+  <Tab title="Connection pool">
+
+```typescript app-data-source.ts
+import { DataSource } from "typeorm"
+
+export const AppDataSource = new DataSource({
+    type: "sap",
+    host: "hana-host.example.com",
+    port: 30015,
+    username: "SYSTEM",
+    password: "mypassword",
+    database: "HXE",
+    pool: {
+        maxConnectedOrPooled: 20,
+        maxPooledIdleTime: 60,
+        maxWaitTimeoutIfPoolExhausted: 5000,
+        pingCheck: true,
+        poolCapacity: 30,
+    },
+    entities: ["src/entities/**/*.ts"],
+})
+```
+
+  </Tab>
+</Tabs>
+
+## Connection options
+
+<ParamField path="type" type="string" required>
+  Must be `"sap"`.
+</ParamField>
+
+<ParamField path="host" type="string">
+  Hostname of the SAP HANA server.
+</ParamField>
+
+<ParamField path="port" type="number">
+  Port of the SAP HANA server. The default system database port is `30013`; tenant databases use `30015` by default.
+</ParamField>
+
+<ParamField path="username" type="string">
+  SAP HANA username.
+</ParamField>
+
+<ParamField path="password" type="string">
+  SAP HANA password.
+</ParamField>
+
+<ParamField path="database" type="string">
+  Database (tenant) name to connect to.
+</ParamField>
+
+<ParamField path="encrypt" type="boolean">
+  Enable TLS encryption for the connection.
+</ParamField>
+
+<ParamField path="sslValidateCertificate" type="boolean">
+  Validate the server's SSL certificate against a CA.
+</ParamField>
+
+<ParamField path="key" type="string">
+  Path or PEM content of the client private key for mutual TLS.
+</ParamField>
+
+<ParamField path="cert" type="string">
+  Path or PEM content of the client certificate for mutual TLS.
+</ParamField>
+
+<ParamField path="ca" type="string">
+  Path or PEM content of the Certificate Authority certificate.
+</ParamField>
+
+<ParamField path="driver" type="object">
+  Explicit `@sap/hana-client` module instance. When omitted, TypeORM loads it automatically.
+</ParamField>
+
+<ParamField path="pool" type="object">
+  Connection pool configuration.
+
+  <Expandable title="pool properties">
+    <ParamField path="pool.maxConnectedOrPooled" type="number" default="10">
+      Maximum number of active or idle connections in the pool.
+    </ParamField>
+    <ParamField path="pool.maxPooledIdleTime" type="number" default="30">
+      Seconds before an idle connection is closed.
+    </ParamField>
+    <ParamField path="pool.maxWaitTimeoutIfPoolExhausted" type="number" default="0">
+      Milliseconds to wait for a connection when the pool is exhausted. `0` means do not wait. Requires `@sap/hana-client` 2.27 or later.
+    </ParamField>
+    <ParamField path="pool.pingCheck" type="boolean" default="false">
+      Validate connections before use by sending a ping.
+    </ParamField>
+    <ParamField path="pool.poolCapacity" type="number">
+      Maximum total connections to keep available. Defaults to no limit.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField path="extra" type="object">
+  Additional properties passed to `@sap/hana-client`. See [Node.js Connection Properties](https://help.sap.com/docs/SAP_HANA_CLIENT/f1b440ded6144a54ada97ff95dac7adf/4fe9978ebac44f35b9369ef5a4a26f4c.html).
+</ParamField>
+
+## Column types
+
+TypeORM's SAP HANA driver supports the following column types:
+
+`tinyint`, `smallint`, `integer`, `bigint`, `smalldecimal`, `decimal`, `real`, `double`, `date`, `time`, `seconddate`, `timestamp`, `boolean`, `char`, `nchar`, `varchar`, `nvarchar`, `text`, `alphanum`, `shorttext`, `array`, `varbinary`, `blob`, `clob`, `nclob`, `st_geometry`, `st_point`, `real_vector`, `half_vector`
+
+<Note>
+  Some types have been deprecated or removed in SAP HANA Cloud. TypeORM automatically converts deprecated types to their closest available alternative when connected to a Cloud database.
+</Note>
+
+### Vector types
+
+SAP HANA Cloud introduced `real_vector` in 2024Q1 and `half_vector` in 2025Q2. Both require a compatible version of `@sap/hana-client`.
+
+For cross-database portability, TypeORM provides aliases:
+- `vector` → `real_vector` (4-byte floats)
+- `halfvec` → `half_vector` (2-byte floats, more memory-efficient)
+
+```typescript
+@Entity()
+export class Document {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    // SAP HANA native type names
+    @Column("real_vector", { length: 1536 })
+    embedding: Buffer | number[]
+
+    @Column("half_vector", { length: 768 })
+    reducedEmbedding: Buffer | number[]
+
+    // Cross-database aliases (recommended)
+    @Column("vector", { length: 1536 })
+    universalEmbedding: Buffer | number[]
+
+    @Column("halfvec", { length: 768 })
+    universalReducedEmbedding: Buffer | number[]
+}
+```
+
+By default, the driver returns vector values as a `Buffer` in `fvecs`/`hvecs` format. To receive a `number[]` instead, set:
+
+```typescript
+const AppDataSource = new DataSource({
+    type: "sap",
+    // ...
+    extra: {
+        vectorOutputType: "Array",
+    },
+})
+```
+
+For similarity searches, use SAP HANA's [vector functions](https://help.sap.com/docs/hana-cloud-database/sap-hana-cloud-sap-hana-database-sql-reference-guide/vector-functions).
+
+## Limitations and notes
+
+<Warning>
+  `real_vector` and `half_vector` types require SAP HANA Cloud (not SAP HANA 2.0 on-premise) and a supported version of `@sap/hana-client`. Attempting to use these types on an unsupported version will result in a runtime error.
+</Warning>
+
+- SAP HANA uses port `30013` for the system database and `30015` (or similar) for tenant databases. Check your HANA configuration for the correct port.
+- The `@sap/hana-client` package is distributed through the SAP NPM registry (`@sap:registry`). If you encounter installation issues, configure your npm client with the SAP registry URL.
+- Schema migrations via `synchronize: true` are not recommended in production. Use TypeORM migrations instead.

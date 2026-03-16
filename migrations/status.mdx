@@ -1,0 +1,53 @@
+---
+title: "Migration status"
+description: "Check which migrations have been applied and which are still pending using typeorm migration:show."
+---
+
+To see the full list of migrations and their execution status:
+
+<Tabs>
+  <Tab title="TypeScript (ts-node CommonJS)">
+    ```bash
+    npx typeorm-ts-node-commonjs migration:show -d src/data-source.ts
+    ```
+  </Tab>
+  <Tab title="TypeScript (ts-node ESM)">
+    ```bash
+    npx typeorm-ts-node-esm migration:show -d src/data-source.ts
+    ```
+  </Tab>
+  <Tab title="Compiled JavaScript">
+    ```bash
+    npx typeorm migration:show -d dist/data-source.js
+    ```
+  </Tab>
+</Tabs>
+
+## Output format
+
+```
+[X] AddUserTable1699000000000
+[X] AddIndexToEmail1699000001000
+[ ] RenamePostTitle1699000002000
+[ ] AddTagsTable1699000003000
+```
+
+| Indicator | Meaning |
+|-----------|-------------------------|
+| `[X]` | Migration has been executed |
+| `[ ]` | Migration is pending (not yet run) |
+
+Migrations are listed in timestamp order, matching the order they will be executed by `migration:run`.
+
+## Using it in CI
+
+The `migration:show` command exits with code `0` regardless of whether there are pending migrations. If you want to fail a CI step when the database is out of date, use `migration:generate --check` instead:
+
+```bash
+# Exits with code 1 if any entity changes would produce a new migration
+npx typeorm-ts-node-commonjs migration:generate --check -d src/data-source.ts src/migrations/check
+```
+
+<Note>
+  `migration:show` connects to the database to read the migrations table. Make sure your DataSource connection settings are correct for the environment you are checking.
+</Note>

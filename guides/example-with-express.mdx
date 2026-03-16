@@ -1,0 +1,262 @@
+---
+title: Example with Express
+description: Build a REST API with TypeORM and Express, including DataSource setup, entity definition, and CRUD routes.
+---
+
+This guide walks you through creating a REST API that manages users using TypeORM and Express. The finished application exposes CRUD endpoints backed by a MySQL database.
+
+## Project structure
+
+```
+user/
+├── src/
+│   ├── app.ts                  # Express app and route handlers
+│   ├── app-data-source.ts      # DataSource configuration
+│   └── entities/
+│       └── User.ts             # User entity
+├── package.json
+└── tsconfig.json
+```
+
+## Set up the project
+
+<Steps>
+  <Step title="Initialize the project">
+    Create a new directory and initialize a Node.js project:
+
+    ```bash
+    mkdir user && cd user
+    npm init -y
+    ```
+  </Step>
+
+  <Step title="Install TypeScript">
+    ```bash
+    npm install typescript --save-dev
+    ```
+
+    Create `tsconfig.json` in the project root:
+
+    ```json
+    {
+        "compilerOptions": {
+            "lib": ["es5", "es6", "dom"],
+            "target": "es5",
+            "module": "commonjs",
+            "moduleResolution": "node",
+            "emitDecoratorMetadata": true,
+            "experimentalDecorators": true
+        }
+    }
+    ```
+
+    <Note>
+    `emitDecoratorMetadata` and `experimentalDecorators` are required for TypeORM's decorator-based column and relation definitions to work.
+    </Note>
+  </Step>
+
+  <Step title="Install Express">
+    ```bash
+    npm install express
+    npm install @types/express --save-dev
+    ```
+  </Step>
+
+  <Step title="Install TypeORM and the database driver">
+    This example uses MySQL. Replace `mysql2` with the driver for your database.
+
+    ```bash
+    npm install typeorm reflect-metadata mysql2
+    ```
+
+    | Package | Purpose |
+    |---|---|
+    | `typeorm` | The ORM itself |
+    | `reflect-metadata` | Required for decorator metadata; must be imported before TypeORM |
+    | `mysql2` | MySQL database driver |
+  </Step>
+</Steps>
+
+## Configure the DataSource
+
+Create `src/app-data-source.ts` to define the database connection:
+
+```typescript
+import { DataSource } from "typeorm"
+
+export const myDataSource = new DataSource({
+    type: "mysql",
+    host: "localhost",
+    port: 3306,
+    username: "test",
+    password: "test",
+    database: "test",
+    entities: [__dirname + "/entities/**/*{.js,.ts}"],
+    logging: true,
+    synchronize: true,
+})
+```
+
+<Warning>
+Do not use `synchronize: true` in production. It can drop columns or tables when your entity definitions change. Use [migrations](/migrations/why) in production environments.
+</Warning>
+
+## Define the User entity
+
+Create `src/entities/User.ts`:
+
+```typescript
+import { Entity, Column, PrimaryGeneratedColumn } from "typeorm"
+
+@Entity()
+export class User {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    @Column()
+    firstName: string
+
+    @Column()
+    lastName: string
+}
+```
+
+## Create the Express app with CRUD routes
+
+Create `src/app.ts` and wire up the DataSource together with Express route handlers:
+
+```typescript
+import "reflect-metadata"
+import * as express from "express"
+import { Request, Response } from "express"
+import { User } from "./entities/User"
+import { myDataSource } from "./app-data-source"
+
+// Initialize the database connection
+try {
+    await myDataSource.initialize()
+    console.log("Data Source has been initialized!")
+} catch (error) {
+    console.error("Error during Data Source initialization:", error)
+    process.exit(1)
+}
+
+const app = express()
+app.use(express.json())
+
+// GET /users — return all users
+app.get("/users", async function (req: Request, res: Response) {
+    const users = await myDataSource.getRepository(User).find()
+    res.json(users)
+})
+
+// GET /users/:id — return a single user
+app.get("/users/:id", async function (req: Request, res: Response) {
+    const user = await myDataSource
+        .getRepository(User)
+        .findOneBy({ id: Number(req.params.id) })
+    if (!user) return res.status(404).json({ message: "User not found" })
+    return res.json(user)
+})
+
+// POST /users — create a new user
+app.post("/users", async function (req: Request, res: Response) {
+    const user = myDataSource.getRepository(User).create(req.body)
+    const result = await myDataSource.getRepository(User).save(user)
+    return res.status(201).json(result)
+})
+
+// PUT /users/:id — update an existing user
+app.put("/users/:id", async function (req: Request, res: Response) {
+    const repo = myDataSource.getRepository(User)
+    const user = await repo.findOneBy({ id: Number(req.params.id) })
+    if (!user) return res.status(404).json({ message: "User not found" })
+    repo.merge(user, req.body)
+    const result = await repo.save(user)
+    return res.json(result)
+})
+
+// DELETE /users/:id — delete a user
+app.delete("/users/:id", async function (req: Request, res: Response) {
+    const result = await myDataSource
+        .getRepository(User)
+        .delete(Number(req.params.id))
+    return res.json(result)
+})
+
+app.listen(3000, () => console.log("Server running on http://localhost:3000"))
+```
+
+## Run the application
+
+Compile and start the server:
+
+```bash
+npx tsc
+node src/app.js
+```
+
+For development with auto-compilation, install `ts-node` and use it directly:
+
+```bash
+npm install ts-node --save-dev
+npx ts-node src/app.ts
+```
+
+## API endpoints
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/users` | Retrieve all users |
+| `GET` | `/users/:id` | Retrieve a user by ID |
+| `POST` | `/users` | Create a new user |
+| `PUT` | `/users/:id` | Update an existing user |
+| `DELETE` | `/users/:id` | Delete a user |
+
+## Error handling
+
+For production use, wrap route handlers in a try/catch and return structured error responses:
+
+```typescript
+app.get("/users/:id", async function (req: Request, res: Response) {
+    try {
+        const user = await myDataSource
+            .getRepository(User)
+            .findOneBy({ id: Number(req.params.id) })
+        if (!user) return res.status(404).json({ message: "User not found" })
+        return res.json(user)
+    } catch (error) {
+        console.error(error)
+        return res.status(500).json({ message: "Internal server error" })
+    }
+})
+```
+
+Alternatively, use an error-handling middleware that wraps all async route handlers:
+
+```typescript
+function asyncHandler(
+    fn: (req: Request, res: Response) => Promise<void>,
+) {
+    return (req: Request, res: Response, next: express.NextFunction) => {
+        fn(req, res).catch(next)
+    }
+}
+
+app.get(
+    "/users/:id",
+    asyncHandler(async (req, res) => {
+        const user = await myDataSource
+            .getRepository(User)
+            .findOneBy({ id: Number(req.params.id) })
+        if (!user) return res.status(404).json({ message: "User not found" })
+        res.json(user)
+    }),
+)
+
+// Error handler
+app.use((err: Error, req: Request, res: Response, _next: express.NextFunction) => {
+    console.error(err)
+    res.status(500).json({ message: "Internal server error" })
+})
+```

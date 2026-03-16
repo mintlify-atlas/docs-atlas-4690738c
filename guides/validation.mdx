@@ -1,0 +1,188 @@
+---
+title: Validation
+description: Validate entity data before saving to the database using class-validator and TypeORM lifecycle hooks.
+---
+
+TypeORM does not include a built-in validation system. The recommended approach is to use [class-validator](https://github.com/typestack/class-validator) together with TypeORM lifecycle hooks to validate entities before they are persisted.
+
+## Installation
+
+<Tabs>
+  <Tab title="npm">
+    ```bash
+    npm install class-validator class-transformer
+    ```
+  </Tab>
+  <Tab title="yarn">
+    ```bash
+    yarn add class-validator class-transformer
+    ```
+  </Tab>
+  <Tab title="pnpm">
+    ```bash
+    pnpm add class-validator class-transformer
+    ```
+  </Tab>
+</Tabs>
+
+## Adding validation decorators to an entity
+
+Place `class-validator` decorators alongside your TypeORM column decorators. Both sets of decorators can coexist on the same property:
+
+```typescript
+import { Entity, PrimaryGeneratedColumn, Column } from "typeorm"
+import {
+    Contains,
+    IsInt,
+    Length,
+    IsEmail,
+    IsFQDN,
+    IsDate,
+    Min,
+    Max,
+} from "class-validator"
+
+@Entity()
+export class Post {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    @Column()
+    @Length(10, 20)
+    title: string
+
+    @Column()
+    @Contains("hello")
+    text: string
+
+    @Column()
+    @IsInt()
+    @Min(0)
+    @Max(10)
+    rating: number
+
+    @Column()
+    @IsEmail()
+    email: string
+
+    @Column()
+    @IsFQDN()
+    site: string
+
+    @Column()
+    @IsDate()
+    createDate: Date
+}
+```
+
+## Validating manually before save
+
+Call `validate` (or `validateOrReject`) from `class-validator` before persisting the entity:
+
+```typescript
+import { validate } from "class-validator"
+
+const post = new Post()
+post.title = "Hello"          // fails @Length(10, 20)
+post.text = "not valid"        // fails @Contains("hello")
+post.rating = 11               // fails @Max(10)
+post.email = "google.com"      // fails @IsEmail()
+post.site = "googlecom"        // fails @IsFQDN()
+
+const errors = await validate(post)
+if (errors.length > 0) {
+    throw new Error(`Validation failed: ${errors}`)
+} else {
+    await dataSource.manager.save(post)
+}
+```
+
+### Using `validateOrReject`
+
+`validateOrReject` throws a `ValidationError[]` directly when validation fails, removing the need for a manual check:
+
+```typescript
+import { validateOrReject } from "class-validator"
+
+const post = new Post()
+post.title = "Hello, world!"
+post.text = "hello, this is a great post"
+post.rating = 5
+post.email = "user@example.com"
+post.site = "example.com"
+post.createDate = new Date()
+
+await validateOrReject(post)   // throws if invalid
+await dataSource.manager.save(post)
+```
+
+## Validating automatically with lifecycle hooks
+
+To enforce validation on every insert or update without calling `validate` at every call site, use the `@BeforeInsert` and `@BeforeUpdate` lifecycle decorators:
+
+```typescript
+import { Entity, PrimaryGeneratedColumn, Column, BeforeInsert, BeforeUpdate } from "typeorm"
+import { validateOrReject, Length, IsEmail, IsInt, Min, Max } from "class-validator"
+
+@Entity()
+export class Post {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    @Column()
+    @Length(10, 20)
+    title: string
+
+    @Column()
+    @IsInt()
+    @Min(0)
+    @Max(10)
+    rating: number
+
+    @Column()
+    @IsEmail()
+    email: string
+
+    @BeforeInsert()
+    @BeforeUpdate()
+    async validate() {
+        await validateOrReject(this)
+    }
+}
+```
+
+Now calling `save` on an invalid entity throws automatically:
+
+```typescript
+const post = new Post()
+post.title = "Hi"       // too short — throws before the INSERT runs
+post.rating = 99
+post.email = "not-an-email"
+
+await dataSource.manager.save(post)  // throws ValidationError[]
+```
+
+<Warning>
+`@BeforeInsert` only fires when you call `save()`. It does not run for `insert()`, `update()`, or raw query methods. If you use those methods, validate explicitly before calling them.
+</Warning>
+
+## Common validators reference
+
+| Decorator | What it checks |
+|---|---|
+| `@Length(min, max)` | String length is within bounds |
+| `@IsEmail()` | Valid email address format |
+| `@IsFQDN()` | Valid fully-qualified domain name |
+| `@IsInt()` | Value is an integer |
+| `@Min(n)` | Number is at least `n` |
+| `@Max(n)` | Number is at most `n` |
+| `@Contains(seed)` | String contains the given substring |
+| `@IsDate()` | Value is a `Date` instance |
+| `@IsNotEmpty()` | Value is not empty (`''`, `null`, `undefined`) |
+| `@IsOptional()` | Skips all validators when value is `null` or `undefined` |
+
+See the [class-validator documentation](https://github.com/typestack/class-validator#validation-decorators) for the full list of available decorators.
+
+<Note>
+When using `@BeforeUpdate`, `class-validator` validates the entire entity object, including properties that were not changed in the current update. If you only want to validate the changed properties, pass `{ skipMissingProperties: true }` to `validateOrReject`.
+</Note>

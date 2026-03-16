@@ -1,0 +1,130 @@
+---
+title: "Setup"
+description: "Configure your TypeORM DataSource to work with migrations, including migration file discovery and optional automatic execution."
+---
+
+Before you can create or run migrations, you need to configure your `DataSource` correctly.
+
+## Minimal configuration
+
+```typescript data-source.ts
+import { DataSource } from "typeorm"
+
+export default new DataSource({
+    type: "postgres",
+    host: "localhost",
+    port: 5432,
+    username: "user",
+    password: "password",
+    database: "mydb",
+
+    synchronize: false,
+    migrations: [__dirname + "/migrations/**/*{.js,.ts}"],
+})
+```
+
+<Warning>
+  Set `synchronize: false` whenever you use migrations. Leaving it as `true` defeats the purpose of migrations and risks unintended schema changes.
+</Warning>
+
+## Migration discovery
+
+The `migrations` option tells TypeORM where to find your migration files. It accepts glob patterns or explicit class references.
+
+### Glob pattern (recommended)
+
+```typescript
+migrations: [__dirname + "/migrations/**/*{.js,.ts}"]
+```
+
+Including both `.js` and `.ts` extensions lets the same configuration work in development (where `ts-node` runs TypeScript directly) and in production (where files are compiled to JavaScript).
+
+### Explicit class list
+
+```typescript
+import { AddUserTable1699000000000 } from "./migrations/1699000000000-AddUserTable"
+import { AddIndexToEmail1699000001000 } from "./migrations/1699000001000-AddIndexToEmail"
+
+export default new DataSource({
+    migrations: [AddUserTable1699000000000, AddIndexToEmail1699000001000],
+})
+```
+
+Explicit imports give you fine-grained control but require manual updates every time you add a migration.
+
+## Optional settings
+
+<ParamField path="migrationsRun" type="boolean" default="false">
+  When `true`, pending migrations run automatically every time the application starts and `dataSource.initialize()` is called. Useful for containerized deployments where you want schema updates to happen as part of startup.
+</ParamField>
+
+<ParamField path="migrationsTableName" type="string" default="'migrations'">
+  The name of the table TypeORM uses to track executed migrations. Override this if the name conflicts with an existing table in your schema.
+
+  ```typescript
+  migrationsTableName: "schema_migrations"
+  ```
+</ParamField>
+
+<ParamField path="migrationsTransactionMode" type="'all' | 'each' | 'none'" default="'all'">
+  Controls how transactions wrap your migrations when running.
+
+  - `"all"` — all pending migrations run inside a single transaction.
+  - `"each"` — each migration runs in its own transaction.
+  - `"none"` — migrations run without any transaction wrapping.
+
+  See [transaction modes](/migrations/extra) for details on per-migration overrides.
+</ParamField>
+
+## Separating migrations from your main app
+
+It is common to keep a dedicated `data-source.ts` (or `ormconfig.ts`) file that the CLI uses, separate from the one your application boots with. This lets you point the CLI at your database without starting your full application server.
+
+```typescript src/data-source.ts
+import { DataSource } from "typeorm"
+import { User } from "./entity/User"
+
+export const AppDataSource = new DataSource({
+    type: "postgres",
+    host: process.env.DB_HOST ?? "localhost",
+    port: Number(process.env.DB_PORT) || 5432,
+    username: process.env.DB_USER ?? "postgres",
+    password: process.env.DB_PASS ?? "",
+    database: process.env.DB_NAME ?? "myapp",
+    synchronize: false,
+    entities: [User],
+    migrations: [__dirname + "/migrations/**/*{.js,.ts}"],
+})
+```
+
+All migration CLI commands accept a `-d` flag pointing to this file:
+
+```bash
+npx typeorm-ts-node-commonjs migration:run -d src/data-source.ts
+```
+
+## Using ts-node vs compiled JavaScript
+
+The TypeORM CLI works with JavaScript by default. To run TypeScript migration files directly without a compilation step, use the `typeorm-ts-node-commonjs` (or `typeorm-ts-node-esm` for ESM projects) binary:
+
+<Tabs>
+  <Tab title="CommonJS">
+    ```bash
+    npx typeorm-ts-node-commonjs migration:run -d src/data-source.ts
+    ```
+  </Tab>
+  <Tab title="ESM">
+    ```bash
+    npx typeorm-ts-node-esm migration:run -d src/data-source.ts
+    ```
+  </Tab>
+  <Tab title="Compiled JS">
+    ```bash
+    npx typeorm migration:run -d dist/data-source.js
+    ```
+  </Tab>
+</Tabs>
+
+<Tip>
+  During development, use `typeorm-ts-node-commonjs` so you can run migrations directly against your `.ts` source files. In CI/CD pipelines, compile first and use the plain `typeorm` binary against the compiled output.
+</Tip>

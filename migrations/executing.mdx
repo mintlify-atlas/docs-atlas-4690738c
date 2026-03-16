@@ -1,0 +1,90 @@
+---
+title: "Executing migrations"
+description: "Run pending migrations against your database using the TypeORM CLI or the DataSource API."
+---
+
+## Running with the CLI
+
+Once you have migration files, run all pending ones in a single command:
+
+<Tabs>
+  <Tab title="TypeScript (ts-node CommonJS)">
+    ```bash
+    npx typeorm-ts-node-commonjs migration:run -d src/data-source.ts
+    ```
+  </Tab>
+  <Tab title="TypeScript (ts-node ESM)">
+    ```bash
+    npx typeorm-ts-node-esm migration:run -d src/data-source.ts
+    ```
+  </Tab>
+  <Tab title="Compiled JavaScript">
+    ```bash
+    npx typeorm migration:run -d dist/data-source.js
+    ```
+  </Tab>
+</Tabs>
+
+This command:
+1. Queries the `migrations` table to find which migrations have already been executed.
+2. Collects all pending migrations (those not yet in the table), ordered by timestamp.
+3. Calls each pending migration's `up` method in sequence.
+4. Records each successfully executed migration in the `migrations` table.
+
+<Warning>
+  `migration:create` and `migration:generate` produce `.ts` files. The plain `typeorm` binary cannot execute TypeScript. Use `typeorm-ts-node-commonjs` or `typeorm-ts-node-esm` in development, or compile to `.js` first for production.
+</Warning>
+
+## CLI flags
+
+<ParamField path="-d, --dataSource" type="string" required>
+  Path to the file exporting your `DataSource` instance.
+</ParamField>
+
+<ParamField path="-t, --transaction" type="'all' | 'each' | 'none'" default="'default'">
+  Override the transaction mode for this run. `"default"` defers to the `migrationsTransactionMode` set on the DataSource (which defaults to `"all"`).
+
+  - `"all"` — wrap all pending migrations in a single transaction.
+  - `"each"` — wrap each migration in its own transaction.
+  - `"none"` — run migrations without transaction wrapping.
+</ParamField>
+
+<ParamField path="-f, --fake" type="boolean" default="false">
+  Mark migrations as executed in the migrations table without actually running them. See [faking migrations](/migrations/faking).
+</ParamField>
+
+## Running programmatically
+
+You can run migrations from application code using `dataSource.runMigrations()`:
+
+```typescript
+import { AppDataSource } from "./data-source"
+
+await AppDataSource.initialize()
+
+const executedMigrations = await AppDataSource.runMigrations({
+    transaction: "all",  // "all" | "each" | "none"
+})
+
+console.log("Executed:", executedMigrations.map((m) => m.name))
+```
+
+`runMigrations()` returns an array of `Migration` objects representing the migrations that were actually executed (already-applied ones are not included).
+
+<Tip>
+  In containerized deployments you can set `migrationsRun: true` in your DataSource options to have migrations run automatically on every `dataSource.initialize()` call. This is convenient but means you cannot audit migrations before they run.
+</Tip>
+
+## Execution order
+
+Migrations always run in ascending timestamp order, regardless of the order they appear in the `migrations` array or directory. This ensures a consistent, deterministic history across all environments.
+
+## What happens on failure
+
+If a migration's `up` method throws an error:
+
+- When using `"all"` transaction mode, the entire batch is rolled back and no changes are committed.
+- When using `"each"` transaction mode, only the failing migration is rolled back; previously executed migrations in this run remain committed.
+- When using `"none"` transaction mode, any changes made before the error are committed.
+
+The failed migration is **not** recorded in the migrations table, so it will be retried on the next `migration:run`.

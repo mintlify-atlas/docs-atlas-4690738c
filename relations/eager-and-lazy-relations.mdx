@@ -1,0 +1,186 @@
+---
+title: "Eager and lazy relations"
+description: "Auto-load relations with eager: true or defer loading until property access with Promise-typed lazy relations. Understand the trade-offs of each approach."
+---
+
+By default, TypeORM does not load related entities unless you explicitly ask for them. Two opt-in strategies change this behaviour: **eager** relations are loaded automatically by `find*` methods, and **lazy** relations are loaded on property access via a `Promise`.
+
+## Eager relations
+
+Set `eager: true` on a relation to have TypeORM always include it when the owner entity is loaded through any `find*` method:
+
+<CodeGroup>
+
+```typescript question.entity.ts
+import {
+    Entity,
+    PrimaryGeneratedColumn,
+    Column,
+    ManyToMany,
+    JoinTable,
+} from "typeorm"
+import { Category } from "./Category"
+
+@Entity()
+export class Question {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    @Column()
+    title: string
+
+    @Column()
+    text: string
+
+    @ManyToMany(() => Category, (category) => category.questions, {
+        eager: true,
+    })
+    @JoinTable()
+    categories: Category[]
+}
+```
+
+```typescript category.entity.ts
+import { Entity, PrimaryGeneratedColumn, Column, ManyToMany } from "typeorm"
+import { Question } from "./Question"
+
+@Entity()
+export class Category {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    @Column()
+    name: string
+
+    @ManyToMany(() => Question, (question) => question.categories)
+    questions: Question[]
+}
+```
+
+</CodeGroup>
+
+Now `find` loads categories without any extra configuration:
+
+```typescript
+const questionRepository = dataSource.getRepository(Question)
+
+// categories are loaded automatically
+const questions = await questionRepository.find()
+```
+
+### Eager relation constraints
+
+<Warning>
+  `eager: true` can only be set on **one side** of a relation. Setting it on both sides throws an error.
+</Warning>
+
+<Warning>
+  Eager loading is **disabled** when using `QueryBuilder`. Use `leftJoinAndSelect` explicitly:
+
+  ```typescript
+  const questions = await dataSource
+      .getRepository(Question)
+      .createQueryBuilder("question")
+      .leftJoinAndSelect("question.categories", "category")
+      .getMany()
+  ```
+</Warning>
+
+## Lazy relations
+
+In a lazy relation, the property type is `Promise<T>` (or `Promise<T[]>`). TypeORM detects this automatically at runtime via reflection metadata — no extra option is required:
+
+<CodeGroup>
+
+```typescript question.entity.ts (lazy)
+import {
+    Entity,
+    PrimaryGeneratedColumn,
+    Column,
+    ManyToMany,
+    JoinTable,
+} from "typeorm"
+import { Category } from "./Category"
+
+@Entity()
+export class Question {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    @Column()
+    title: string
+
+    @Column()
+    text: string
+
+    @ManyToMany(() => Category, (category) => category.questions)
+    @JoinTable()
+    categories: Promise<Category[]>
+}
+```
+
+```typescript category.entity.ts (lazy)
+import { Entity, PrimaryGeneratedColumn, Column, ManyToMany } from "typeorm"
+import { Question } from "./Question"
+
+@Entity()
+export class Category {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    @Column()
+    name: string
+
+    @ManyToMany(() => Question, (question) => question.categories)
+    questions: Promise<Question[]>
+}
+```
+
+</CodeGroup>
+
+### Saving a lazy relation
+
+Wrap the value in `Promise.resolve` when assigning:
+
+```typescript
+const category1 = new Category()
+category1.name = "animals"
+await dataSource.manager.save(category1)
+
+const category2 = new Category()
+category2.name = "zoo"
+await dataSource.manager.save(category2)
+
+const question = new Question()
+question.categories = Promise.resolve([category1, category2])
+await dataSource.manager.save(question)
+```
+
+### Loading a lazy relation
+
+Await the property to trigger the database query:
+
+```typescript
+const [question] = await dataSource.getRepository(Question).find()
+
+// triggers a query to fetch categories
+const categories = await question.categories
+```
+
+<Warning>
+  Lazy relations are **experimental** in TypeORM. They rely on JavaScript `Promise` semantics and behave very differently from lazy loading in Java or PHP frameworks. Each property access issues a separate database query.
+</Warning>
+
+## Choosing a strategy
+
+| | Eager | Lazy | Default (explicit) |
+|---|---|---|---|
+| Loaded automatically | Yes (`find*` only) | On `await` | No |
+| Works with `QueryBuilder` | No (use join) | No (use join) | Yes |
+| Extra queries | One join per load | One query per `await` | Only when requested |
+| Both sides allowed | No (one side only) | Yes | Yes |
+| Experimental | No | Yes | No |
+
+<Tip>
+  For most applications, the default explicit approach (passing `relations` in `find` options or using `QueryBuilder` joins) gives the most predictable performance and query behaviour. Reserve `eager` for small, frequently needed relations and use `lazy` only when you need on-demand per-instance loading.
+</Tip>

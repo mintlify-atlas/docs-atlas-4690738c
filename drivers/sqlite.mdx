@@ -1,0 +1,293 @@
+---
+title: "SQLite"
+description: "Connect TypeORM to SQLite using better-sqlite3 or sql.js. Covers file-based and in-memory databases, WAL mode, encryption, and mobile platform drivers."
+---
+
+TypeORM supports SQLite through several drivers depending on your runtime environment. The most common choices for Node.js are `better-sqlite3` (synchronous, recommended) and `sql.js` (pure JavaScript, works in browsers).
+
+## Installation
+
+<Tabs>
+  <Tab title="better-sqlite3">
+
+<CodeGroup>
+
+```bash npm
+npm install better-sqlite3
+```
+
+```bash yarn
+yarn add better-sqlite3
+```
+
+```bash pnpm
+pnpm add better-sqlite3
+```
+
+</CodeGroup>
+
+Type definitions:
+
+```bash npm
+npm install -D @types/better-sqlite3
+```
+
+  </Tab>
+  <Tab title="sql.js">
+
+<CodeGroup>
+
+```bash npm
+npm install sql.js
+```
+
+```bash yarn
+yarn add sql.js
+```
+
+```bash pnpm
+pnpm add sql.js
+```
+
+</CodeGroup>
+
+  </Tab>
+</Tabs>
+
+For mobile and cross-platform runtimes (Capacitor, Cordova, Expo, NativeScript, React Native), `sql.js` is typically the best choice as it runs entirely in JavaScript without native bindings.
+
+## DataSource configuration
+
+<Tabs>
+  <Tab title="File-based (better-sqlite3)">
+
+```typescript app-data-source.ts
+import { DataSource } from "typeorm"
+
+export const AppDataSource = new DataSource({
+    type: "better-sqlite3",
+    database: "./data/mydb.sqlite",
+    enableWAL: true,
+    statementCacheSize: 100,
+    timeout: 5000,
+    synchronize: false,
+    logging: false,
+    entities: ["src/entities/**/*.ts"],
+    migrations: ["src/migrations/**/*.ts"],
+})
+```
+
+  </Tab>
+  <Tab title="In-memory (better-sqlite3)">
+
+```typescript app-data-source.ts
+import { DataSource } from "typeorm"
+
+export const AppDataSource = new DataSource({
+    type: "better-sqlite3",
+    database: ":memory:",
+    synchronize: true,
+    entities: ["src/entities/**/*.ts"],
+})
+```
+
+  </Tab>
+  <Tab title="sql.js">
+
+```typescript app-data-source.ts
+import { DataSource } from "typeorm"
+
+export const AppDataSource = new DataSource({
+    type: "sqljs",
+    autoSave: true,
+    location: "./data/mydb.sqlite",
+    synchronize: false,
+    logging: false,
+    entities: ["src/entities/**/*.ts"],
+})
+```
+
+  </Tab>
+  <Tab title="Read-only">
+
+```typescript app-data-source.ts
+import { DataSource } from "typeorm"
+
+export const AppDataSource = new DataSource({
+    type: "better-sqlite3",
+    database: "./data/mydb.sqlite",
+    readonly: true,
+    fileMustExist: true,
+    entities: ["src/entities/**/*.ts"],
+})
+```
+
+  </Tab>
+</Tabs>
+
+## Connection options
+
+### `better-sqlite3` options
+
+<ParamField path="type" type="string" required>
+  Must be `"better-sqlite3"`.
+</ParamField>
+
+<ParamField path="database" type="string" required>
+  Path to the SQLite database file, or `":memory:"` for an in-memory database.
+</ParamField>
+
+<ParamField path="enableWAL" type="boolean" default="false">
+  Enable [WAL (Write-Ahead Logging)](https://www.sqlite.org/wal.html) mode. Recommended for most applications — improves concurrent read performance significantly.
+</ParamField>
+
+<ParamField path="statementCacheSize" type="number" default="100">
+  Number of prepared statements to keep in the cache. Larger values improve performance for repeated queries at the cost of memory.
+</ParamField>
+
+<ParamField path="timeout" type="number" default="5000">
+  Milliseconds to wait when executing a query on a locked database before throwing a `SQLITE_BUSY` error.
+</ParamField>
+
+<ParamField path="readonly" type="boolean" default="false">
+  Open the database in read-only mode. Write operations will throw.
+</ParamField>
+
+<ParamField path="fileMustExist" type="boolean" default="false">
+  Throw an error if the database file does not exist instead of creating a new one. Has no effect for in-memory or read-only connections.
+</ParamField>
+
+<ParamField path="key" type="string">
+  Encryption key for [SQLCipher](https://www.zetetic.net/sqlcipher/). Requires a SQLCipher-enabled build of `better-sqlite3`.
+</ParamField>
+
+<ParamField path="nativeBinding" type="string">
+  Relative or absolute path to the native addon file (`better_sqlite3.node`). Useful in packaged Electron apps.
+</ParamField>
+
+<ParamField path="prepareDatabase" type="(db: Database) => void | Promise<void>">
+  Function called before TypeORM uses the database. Use it to set PRAGMAs, register custom functions, or load extensions.
+</ParamField>
+
+<ParamField path="verbose" type="Function">
+  Called with every SQL string executed by the connection. Use for custom query logging.
+</ParamField>
+
+### `sql.js` options
+
+<ParamField path="type" type="string" required>
+  Must be `"sqljs"`.
+</ParamField>
+
+<ParamField path="database" type="Uint8Array">
+  Raw database bytes to import. Use this to load an existing database from a buffer.
+</ParamField>
+
+<ParamField path="sqlJsConfig" type="object">
+  Optional initialization config passed to `sql.js`.
+</ParamField>
+
+<ParamField path="autoSave" type="boolean">
+  Persist the database after every change. Requires either `location` or `autoSaveCallback`.
+</ParamField>
+
+<ParamField path="autoSaveCallback" type="(data: Uint8Array) => void">
+  Called with the serialized database bytes after every change when `autoSave` is enabled and no `location` is set.
+</ParamField>
+
+<ParamField path="location" type="string">
+  File path (Node.js) or `localStorage`/`indexedDB` key (browser) to load from and save to.
+</ParamField>
+
+<ParamField path="useLocalForage" type="boolean">
+  Use [localforage](https://github.com/localForage/localForage) for async IndexedDB persistence in browsers instead of synchronous `localStorage`.
+</ParamField>
+
+## Column types
+
+`int`, `int2`, `int8`, `integer`, `tinyint`, `smallint`, `mediumint`, `bigint`, `decimal`, `numeric`, `float`, `double`, `real`, `double precision`, `datetime`, `varying character`, `character`, `native character`, `varchar`, `nchar`, `nvarchar2`, `unsigned big int`, `boolean`, `blob`, `text`, `clob`, `date`, `json`, `jsonb`
+
+### JSON and JSONB
+
+TypeORM supports both `json` and `jsonb` types in SQLite:
+
+- `json` — stored as `TEXT`.
+- `jsonb` — stored using SQLite's binary JSON format. TypeORM wraps values with `jsonb()` on write and `json()` on read for transparent support.
+
+<Note>
+  `jsonb` requires SQLite 3.45.0 or newer. When you use the `jsonb` column type, SQLite stores the value as a binary `BLOB` internally.
+</Note>
+
+## In-memory databases
+
+In-memory databases exist only for the lifetime of the connection. They are useful for testing:
+
+```typescript
+const TestDataSource = new DataSource({
+    type: "better-sqlite3",
+    database: ":memory:",
+    synchronize: true,
+    entities: [User, Post],
+})
+
+beforeEach(async () => {
+    await TestDataSource.initialize()
+})
+
+afterEach(async () => {
+    await TestDataSource.destroy()
+})
+```
+
+## WAL mode
+
+WAL mode enables concurrent reads while a write is in progress, which significantly improves throughput for read-heavy workloads:
+
+```typescript
+const AppDataSource = new DataSource({
+    type: "better-sqlite3",
+    database: "./data/mydb.sqlite",
+    enableWAL: true,
+})
+```
+
+Alternatively, enable WAL mode manually via `prepareDatabase`:
+
+```typescript
+const AppDataSource = new DataSource({
+    type: "better-sqlite3",
+    database: "./data/mydb.sqlite",
+    prepareDatabase: (db) => {
+        db.pragma("journal_mode = WAL")
+        db.pragma("foreign_keys = ON")
+    },
+})
+```
+
+## Custom functions and pragmas
+
+Use `prepareDatabase` to configure the connection before TypeORM uses it:
+
+```typescript
+const AppDataSource = new DataSource({
+    type: "better-sqlite3",
+    database: "./data/mydb.sqlite",
+    prepareDatabase: (db) => {
+        // Enable foreign key enforcement
+        db.pragma("foreign_keys = ON")
+        // Register a custom scalar function
+        db.function("upper_trim", (s: string) => s.toUpperCase().trim())
+    },
+})
+```
+
+## Limitations and notes
+
+<Warning>
+  `better-sqlite3` is a synchronous driver. It does not support connection pooling — `poolSize` is not available and will cause a TypeScript error. All queries block the Node.js event loop. For high-concurrency server applications, consider a client-server database like PostgreSQL or MySQL.
+</Warning>
+
+- SQLite does not support multiple concurrent write connections to the same file. WAL mode enables concurrent reads alongside a single writer.
+- `sql.js` runs entirely in memory and requires explicit persistence (via `autoSave` or `autoSaveCallback`). It is suitable for browser environments and read-only use cases in Node.js.
+- Altering column types via migrations has limited support in SQLite because `ALTER COLUMN` is not supported. TypeORM works around this by recreating tables, which can be slow for large tables.
+- The `foreign_keys` pragma is `OFF` by default in SQLite. Enable it via `prepareDatabase` if you rely on foreign key constraints.

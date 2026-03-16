@@ -1,0 +1,335 @@
+---
+title: "MySQL / MariaDB"
+description: "Connect TypeORM to MySQL, MariaDB, and Amazon Aurora MySQL using the mysql2 driver. Covers SSL, charset, connection pooling, replication, and database-specific column types."
+---
+
+TypeORM supports MySQL, MariaDB, and Amazon Aurora MySQL through the `mysql2` Node.js driver.
+
+## Installation
+
+<CodeGroup>
+
+```bash npm
+npm install mysql2
+```
+
+```bash yarn
+yarn add mysql2
+```
+
+```bash pnpm
+pnpm add mysql2
+```
+
+</CodeGroup>
+
+## DataSource configuration
+
+<Tabs>
+  <Tab title="MySQL">
+
+```typescript app-data-source.ts
+import { DataSource } from "typeorm"
+
+export const AppDataSource = new DataSource({
+    type: "mysql",
+    host: "localhost",
+    port: 3306,
+    username: "myuser",
+    password: "mypassword",
+    database: "mydb",
+    charset: "utf8mb4",
+    timezone: "local",
+    connectTimeout: 10000,
+    supportBigNumbers: true,
+    bigNumberStrings: true,
+    synchronize: false,
+    logging: false,
+    entities: ["src/entities/**/*.ts"],
+    migrations: ["src/migrations/**/*.ts"],
+    poolSize: 10,
+})
+```
+
+  </Tab>
+  <Tab title="MariaDB">
+
+```typescript app-data-source.ts
+import { DataSource } from "typeorm"
+
+export const AppDataSource = new DataSource({
+    type: "mariadb",
+    host: "localhost",
+    port: 3306,
+    username: "myuser",
+    password: "mypassword",
+    database: "mydb",
+    charset: "utf8mb4_unicode_ci",
+    synchronize: false,
+    logging: false,
+    entities: ["src/entities/**/*.ts"],
+    migrations: ["src/migrations/**/*.ts"],
+})
+```
+
+  </Tab>
+  <Tab title="SSL">
+
+```typescript app-data-source.ts
+import { DataSource } from "typeorm"
+import fs from "fs"
+
+export const AppDataSource = new DataSource({
+    type: "mysql",
+    host: "db.example.com",
+    port: 3306,
+    username: "myuser",
+    password: "mypassword",
+    database: "mydb",
+    ssl: {
+        rejectUnauthorized: true,
+        ca: fs.readFileSync("server-ca.pem").toString(),
+        key: fs.readFileSync("client-key.pem").toString(),
+        cert: fs.readFileSync("client-cert.pem").toString(),
+    },
+    entities: ["src/entities/**/*.ts"],
+})
+```
+
+  </Tab>
+  <Tab title="Replication">
+
+```typescript app-data-source.ts
+import { DataSource } from "typeorm"
+
+export const AppDataSource = new DataSource({
+    type: "mysql",
+    replication: {
+        master: {
+            host: "primary.db.example.com",
+            port: 3306,
+            username: "myuser",
+            password: "mypassword",
+            database: "mydb",
+        },
+        slaves: [
+            {
+                host: "replica1.db.example.com",
+                port: 3306,
+                username: "myuser",
+                password: "mypassword",
+                database: "mydb",
+            },
+        ],
+        selector: "RR",
+        defaultMode: "slave",
+    },
+    entities: ["src/entities/**/*.ts"],
+})
+```
+
+  </Tab>
+</Tabs>
+
+## Connection options
+
+<ParamField path="type" type="string" required>
+  Must be `"mysql"`, `"mariadb"`, or `"aurora-mysql"`.
+</ParamField>
+
+<ParamField path="host" type="string" default="'localhost'">
+  Hostname or IP address of the MySQL server.
+</ParamField>
+
+<ParamField path="port" type="number" default="3306">
+  TCP port the server listens on.
+</ParamField>
+
+<ParamField path="username" type="string">
+  Database user.
+</ParamField>
+
+<ParamField path="password" type="string">
+  Database password.
+</ParamField>
+
+<ParamField path="database" type="string">
+  Database name.
+</ParamField>
+
+<ParamField path="url" type="string">
+  Full connection URL (e.g. `mysql://user:pass@host:3306/db`). Individual options override URL components when both are provided.
+</ParamField>
+
+<ParamField path="socketPath" type="string">
+  Path to the Unix domain socket. For example, `"/var/run/mysqld/mysqld.sock"`. Mutually exclusive with `host` and `port`.
+</ParamField>
+
+<ParamField path="ssl" type="object | string">
+  SSL parameters or the name of an SSL profile string. See [mysql2 SSL options](https://sidorares.github.io/node-mysql2/docs).
+</ParamField>
+
+<ParamField path="charset" type="string" default="'UTF8_GENERAL_CI'">
+  Connection charset. For full Unicode support use `"utf8mb4"` or `"utf8mb4_unicode_ci"`.
+</ParamField>
+
+<ParamField path="timezone" type="string" default="'local'">
+  Timezone used to cast server date/time values. Accepts `"local"`, `"Z"`, or an offset like `"+05:30"`.
+</ParamField>
+
+<ParamField path="connectTimeout" type="number" default="10000">
+  Milliseconds before a timeout occurs during the initial TCP connection.
+</ParamField>
+
+<ParamField path="acquireTimeout" type="number" default="10000">
+  Milliseconds before a timeout occurs while acquiring a connection from the pool. Governs the pool acquisition wait, unlike `connectTimeout` which governs the TCP handshake.
+</ParamField>
+
+<ParamField path="poolSize" type="number">
+  Maximum number of connections per pool.
+</ParamField>
+
+<ParamField path="supportBigNumbers" type="boolean" default="true">
+  Enable proper handling of `BIGINT` and `DECIMAL` columns. Should be `true` when working with large numeric values.
+</ParamField>
+
+<ParamField path="bigNumberStrings" type="boolean" default="true">
+  When both `supportBigNumbers` and `bigNumberStrings` are `true`, all big numbers are returned as JavaScript `String` objects. When only `supportBigNumbers` is `true`, big numbers are returned as strings only when they exceed the safe integer range.
+</ParamField>
+
+<ParamField path="dateStrings" type="boolean | string[]" default="false">
+  Return date/time columns as raw strings instead of JavaScript `Date` objects. Pass an array of type names (e.g. `["DATETIME"]`) to limit this to specific types.
+</ParamField>
+
+<ParamField path="multipleStatements" type="boolean" default="false">
+  Allow multiple SQL statements per query call. Increases SQL injection risk — enable only when necessary.
+</ParamField>
+
+<ParamField path="legacySpatialSupport" type="boolean" default="false">
+  Use deprecated spatial functions (`GeomFromText`, `AsText`) removed in MySQL 8.0. Set to `true` only when targeting MySQL 5.x.
+</ParamField>
+
+<ParamField path="flags" type="string[]">
+  Additional or blacklisted connection flags. See [Connection Flags](https://github.com/mysqljs/mysql#connection-flags).
+</ParamField>
+
+<ParamField path="enableQueryTimeout" type="boolean">
+  When `true` and `maxQueryExecutionTime` is set, use `maxQueryExecutionTime` as the query execution timeout. See [mysql2 timeouts](https://github.com/mysqljs/mysql#timeouts).
+</ParamField>
+
+<ParamField path="insecureAuth" type="boolean" default="false">
+  Allow connections to MySQL servers that use the old (pre-4.1) authentication protocol.
+</ParamField>
+
+<ParamField path="extra" type="object">
+  Passed directly to the underlying `mysql2` connection or pool. See the [mysql2 documentation](https://sidorares.github.io/node-mysql2/docs) for all available options.
+</ParamField>
+
+## Column types
+
+MySQL and MariaDB support the following column types:
+
+`bit`, `int`, `integer`, `tinyint`, `smallint`, `mediumint`, `bigint`, `float`, `double`, `double precision`, `dec`, `decimal`, `numeric`, `fixed`, `bool`, `boolean`, `date`, `datetime`, `timestamp`, `time`, `year`, `char`, `nchar`, `national char`, `varchar`, `nvarchar`, `national varchar`, `text`, `tinytext`, `mediumtext`, `blob`, `longtext`, `tinyblob`, `mediumblob`, `longblob`, `enum`, `set`, `json`, `binary`, `varbinary`, `geometry`, `point`, `linestring`, `polygon`, `multipoint`, `multilinestring`, `multipolygon`, `geometrycollection`, `uuid`, `inet4`, `inet6`
+
+<Note>
+  `uuid`, `inet4`, and `inet6` are MariaDB-only types. Check the MariaDB release notes for the version that introduced each type.
+</Note>
+
+### `enum` column type
+
+```typescript
+export enum UserRole {
+    ADMIN = "admin",
+    EDITOR = "editor",
+    VIEWER = "viewer",
+}
+
+@Entity()
+export class User {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    @Column({ type: "enum", enum: UserRole, default: UserRole.VIEWER })
+    role: UserRole
+}
+```
+
+### `set` column type
+
+The `set` type stores a collection of values from a predefined list. It is available on both MySQL and MariaDB.
+
+```typescript
+export enum UserRole {
+    ADMIN = "admin",
+    EDITOR = "editor",
+    GHOST = "ghost",
+}
+
+@Entity()
+export class User {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    @Column({
+        type: "set",
+        enum: UserRole,
+        default: [UserRole.GHOST, UserRole.EDITOR],
+    })
+    roles: UserRole[]
+}
+```
+
+Or with a plain string array:
+
+```typescript
+@Column({
+    type: "set",
+    enum: ["admin", "editor", "ghost"],
+    default: ["ghost", "editor"],
+})
+roles: string[]
+```
+
+### Vector types
+
+MySQL supports the `VECTOR` type since version 9.0. MariaDB supports vectors since version 11.7.
+
+## MySQL vs MariaDB differences
+
+| Feature | MySQL | MariaDB |
+|---|---|---|
+| Data source type | `"mysql"` | `"mariadb"` |
+| `uuid` column type | No | Yes (since 10.7) |
+| `inet4` / `inet6` types | No | Yes |
+| `VECTOR` type | Since 9.0 | Since 11.7 |
+| `set` column type | Yes | Yes |
+| Legacy spatial functions | Removed in 8.0 | Available |
+
+## Connection pooling
+
+`mysql2` manages a connection pool internally. Use `poolSize` to set the maximum number of connections:
+
+```typescript
+const AppDataSource = new DataSource({
+    type: "mysql",
+    // ...
+    poolSize: 20,
+    acquireTimeout: 30000,
+})
+```
+
+For read/write splitting across a primary and replica(s), configure the `replication` option. The `selector` field controls how replicas are chosen:
+
+- `"RR"` — round-robin (default)
+- `"RANDOM"` — random selection
+- `"ORDER"` — always use the first available replica
+
+## Limitations and notes
+
+<Warning>
+  Setting `multipleStatements: true` increases the impact of SQL injection vulnerabilities. Enable it only when the feature is strictly necessary and inputs are fully controlled.
+</Warning>
+
+- TypeORM uses `mysql2` exclusively. The older `mysql` package is not supported.
+- The `legacySpatialSupport` option exists only to support MySQL 5.x deployments. Do not enable it on MySQL 8.0 or later.
+- Aurora MySQL uses the same `mysql2` driver and the `"aurora-mysql"` type. Aurora-specific features (e.g. Data API) are not exposed through TypeORM's standard API.

@@ -1,0 +1,285 @@
+---
+title: "Query result caching"
+description: "Cache QueryBuilder and Repository query results in TypeORM using database tables, Redis, or a custom provider. Control cache duration, cache IDs, and invalidation."
+---
+
+## Overview
+
+TypeORM can cache the results of the following methods:
+
+- `SelectQueryBuilder`: `getMany()`, `getOne()`, `getRawMany()`, `getRawOne()`, `getCount()`
+- `Repository` / `EntityManager`: `find*()`, `count*()`
+
+Caching is opt-in and must be explicitly enabled in your `DataSource` configuration before it can be used on individual queries.
+
+## Enabling caching
+
+<Steps>
+  <Step title="Enable caching in DataSource options">
+    Set `cache: true` in your data source configuration:
+
+    ```typescript
+    const dataSource = new DataSource({
+        type: "mysql",
+        host: "localhost",
+        username: "test",
+        // ...
+        cache: true,
+    })
+    ```
+  </Step>
+  <Step title="Synchronize the schema">
+    The first time you enable caching, TypeORM creates a `query-result-cache` table to store cached results. Synchronize your schema once:
+
+    ```bash
+    typeorm schema:sync
+    # or enable synchronize: true temporarily in DataSource options
+    ```
+  </Step>
+  <Step title="Enable caching per query">
+    Add `.cache(true)` to any `QueryBuilder` call:
+
+    ```typescript
+    const users = await dataSource
+        .createQueryBuilder(User, "user")
+        .where("user.isAdmin = :isAdmin", { isAdmin: true })
+        .cache(true)
+        .getMany()
+    ```
+
+    Or set `cache: true` in a repository find:
+
+    ```typescript
+    const users = await dataSource.getRepository(User).find({
+        where: { isAdmin: true },
+        cache: true,
+    })
+    ```
+  </Step>
+</Steps>
+
+The default cache lifetime is **1000 ms** (1 second). If 150 users load the same page within a 3-second window, only 3 database queries are executed.
+
+## Cache duration
+
+Specify a custom duration in milliseconds:
+
+<CodeGroup>
+
+```typescript QueryBuilder
+const users = await dataSource
+    .createQueryBuilder(User, "user")
+    .where("user.isAdmin = :isAdmin", { isAdmin: true })
+    .cache(60000) // 1 minute
+    .getMany()
+```
+
+```typescript Repository
+const users = await dataSource.getRepository(User).find({
+    where: { isAdmin: true },
+    cache: 60000,
+})
+```
+
+```typescript DataSource (global default)
+const dataSource = new DataSource({
+    type: "mysql",
+    // ...
+    cache: {
+        duration: 30000, // 30 seconds for all cached queries
+    },
+})
+```
+
+</CodeGroup>
+
+## Cache IDs
+
+Assign a stable string identifier to a cached query. This lets you target specific cached results for manual invalidation.
+
+<CodeGroup>
+
+```typescript QueryBuilder
+const users = await dataSource
+    .createQueryBuilder(User, "user")
+    .where("user.isAdmin = :isAdmin", { isAdmin: true })
+    .cache("users_admins", 25000)
+    .getMany()
+```
+
+```typescript Repository
+const users = await dataSource.getRepository(User).find({
+    where: { isAdmin: true },
+    cache: {
+        id: "users_admins",
+        milliseconds: 25000,
+    },
+})
+```
+
+</CodeGroup>
+
+## Invalidating cache
+
+Call `queryResultCache.remove()` with an array of cache IDs to invalidate specific entries. For example, clear the admin users cache after inserting a new admin:
+
+```typescript
+await dataSource.queryResultCache.remove(["users_admins"])
+```
+
+To clear the entire cache:
+
+```bash
+typeorm cache:clear
+```
+
+## Cache providers
+
+<Tabs>
+  <Tab title="Database table (default)">
+    TypeORM stores cached results in a `query-result-cache` table in the same database. You can rename the table using `tableName`:
+
+    ```typescript
+    const dataSource = new DataSource({
+        type: "mysql",
+        // ...
+        cache: {
+            type: "database",
+            tableName: "my_query_cache",
+        },
+    })
+    ```
+  </Tab>
+  <Tab title="Redis">
+    Store cached results in Redis instead of the database:
+
+    ```typescript
+    const dataSource = new DataSource({
+        type: "mysql",
+        // ...
+        cache: {
+            type: "redis",
+            options: {
+                socket: {
+                    host: "localhost",
+                    port: 6379,
+                },
+            },
+        },
+    })
+    ```
+
+    The `options` object is passed directly to [node-redis](https://github.com/redis/node-redis/blob/master/docs/client-configuration.md).
+  </Tab>
+  <Tab title="IORedis">
+    Use the `ioredis` client instead:
+
+    ```typescript
+    const dataSource = new DataSource({
+        type: "mysql",
+        // ...
+        cache: {
+            type: "ioredis",
+            options: {
+                host: "localhost",
+                port: 6379,
+            },
+        },
+    })
+    ```
+
+    The `options` object is passed directly to [ioredis](https://github.com/luin/ioredis/blob/master/API.md#new-redisport-host-options).
+  </Tab>
+  <Tab title="IORedis cluster">
+    Connect to a Redis cluster:
+
+    ```typescript
+    const dataSource = new DataSource({
+        // ...
+        cache: {
+            type: "ioredis/cluster",
+            options: {
+                startupNodes: [
+                    { host: "localhost", port: 7000 },
+                    { host: "localhost", port: 7001 },
+                    { host: "localhost", port: 7002 },
+                ],
+                options: {
+                    scaleReads: "all",
+                    clusterRetryStrategy: (times) => null,
+                    redisOptions: {
+                        maxRetriesPerRequest: 1,
+                    },
+                },
+            },
+        },
+    })
+    ```
+
+    Alternatively, pass the startup nodes array directly as `options` (first argument of the IORedis cluster constructor):
+
+    ```typescript
+    cache: {
+        type: "ioredis/cluster",
+        options: [
+            { host: "localhost", port: 7000 },
+            { host: "localhost", port: 7001 },
+            { host: "localhost", port: 7002 },
+        ],
+    }
+    ```
+  </Tab>
+  <Tab title="Custom provider">
+    Implement the `QueryResultCache` interface and provide a factory function:
+
+    ```typescript
+    import { QueryResultCache, QueryResultCacheOptions, DataSource } from "typeorm"
+
+    class CustomQueryResultCache implements QueryResultCache {
+        constructor(private dataSource: DataSource) {}
+
+        async connect(): Promise<void> { /* ... */ }
+        async disconnect(): Promise<void> { /* ... */ }
+        async synchronize(queryRunner?: any): Promise<void> { /* ... */ }
+        async getFromCache(options: QueryResultCacheOptions, queryRunner?: any) { /* ... */ }
+        async storeInCache(options: QueryResultCacheOptions, savedCache: any, queryRunner?: any) { /* ... */ }
+        async isExpired(savedCache: QueryResultCacheOptions): Promise<boolean> { /* ... */ }
+        async clear(queryRunner?: any): Promise<void> { /* ... */ }
+        async remove(identifiers: string[], queryRunner?: any): Promise<void> { /* ... */ }
+    }
+    ```
+
+    ```typescript
+    const dataSource = new DataSource({
+        // ...
+        cache: {
+            provider(dataSource) {
+                return new CustomQueryResultCache(dataSource)
+            },
+        },
+    })
+    ```
+  </Tab>
+</Tabs>
+
+## Ignoring cache errors
+
+By default, a cache provider error (for example, Redis being unavailable) causes the query to fail. Set `ignoreErrors: true` to fall back to the database transparently:
+
+```typescript
+const dataSource = new DataSource({
+    type: "mysql",
+    // ...
+    cache: {
+        type: "redis",
+        options: {
+            socket: { host: "localhost", port: 6379 },
+        },
+        ignoreErrors: true,
+    },
+})
+```
+
+<Tip>
+`ignoreErrors: true` is recommended in production when using an external cache provider. It ensures that a cache outage degrades gracefully to direct database queries rather than causing application errors.
+</Tip>

@@ -1,0 +1,226 @@
+---
+title: "Entity inheritance"
+description: "Share columns and behavior across entities using concrete table inheritance or single table inheritance."
+---
+
+TypeORM supports two inheritance strategies for entities: **concrete table inheritance** (each subclass gets its own table) and **single table inheritance** (all subclasses share one table).
+
+## Concrete table inheritance
+
+Concrete table inheritance uses a non-decorated abstract base class to share column definitions. Each subclass decorated with `@Entity()` gets its own database table.
+
+### Without inheritance (duplicated code)
+
+```typescript
+@Entity()
+export class Photo {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    @Column()
+    title: string
+
+    @Column()
+    description: string
+
+    @Column()
+    size: string
+}
+
+@Entity()
+export class Question {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    @Column()
+    title: string
+
+    @Column()
+    description: string
+
+    @Column()
+    answersCount: number
+}
+
+@Entity()
+export class Post {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    @Column()
+    title: string
+
+    @Column()
+    description: string
+
+    @Column()
+    viewCount: number
+}
+```
+
+### With concrete table inheritance
+
+Extract shared columns into an abstract base class with no `@Entity()` decorator:
+
+```typescript content.base.ts
+import { PrimaryGeneratedColumn, Column } from "typeorm"
+
+export abstract class Content {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    @Column()
+    title: string
+
+    @Column()
+    description: string
+}
+```
+
+Each concrete entity extends the base class and adds its own columns:
+
+<CodeGroup>
+
+```typescript photo.entity.ts
+import { Entity, Column } from "typeorm"
+import { Content } from "./Content"
+
+@Entity()
+export class Photo extends Content {
+    @Column()
+    size: string
+}
+```
+
+```typescript question.entity.ts
+import { Entity, Column } from "typeorm"
+import { Content } from "./Content"
+
+@Entity()
+export class Question extends Content {
+    @Column()
+    answersCount: number
+}
+```
+
+```typescript post.entity.ts
+import { Entity, Column } from "typeorm"
+import { Content } from "./Content"
+
+@Entity()
+export class Post extends Content {
+    @Column()
+    viewCount: number
+}
+```
+
+</CodeGroup>
+
+This creates three separate tables — `photo`, `question`, and `post` — each containing the inherited `id`, `title`, and `description` columns alongside their own columns.
+
+<Note>
+  All columns, relations, and embeds defined on the parent class are inherited by every subclass. A parent class can itself extend another class.
+</Note>
+
+## Single table inheritance
+
+With single table inheritance, all subclasses are stored in **one table**. A discriminator column stores the subclass name so TypeORM can hydrate the correct class when reading from the database.
+
+### Defining the parent entity
+
+Apply `@TableInheritance` to the base entity and specify the discriminator column:
+
+```typescript content.entity.ts
+import {
+    Entity,
+    TableInheritance,
+    PrimaryGeneratedColumn,
+    Column,
+} from "typeorm"
+
+@Entity()
+@TableInheritance({ column: { type: "varchar", name: "type" } })
+export class Content {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    @Column()
+    title: string
+
+    @Column()
+    description: string
+}
+```
+
+### Defining child entities
+
+Mark each subclass with `@ChildEntity()`. No `@Entity()` is needed on the children:
+
+<CodeGroup>
+
+```typescript photo.entity.ts
+import { ChildEntity, Column } from "typeorm"
+import { Content } from "./Content"
+
+@ChildEntity()
+export class Photo extends Content {
+    @Column()
+    size: string
+}
+```
+
+```typescript question.entity.ts
+import { ChildEntity, Column } from "typeorm"
+import { Content } from "./Content"
+
+@ChildEntity()
+export class Question extends Content {
+    @Column()
+    answersCount: number
+}
+```
+
+```typescript post.entity.ts
+import { ChildEntity, Column } from "typeorm"
+import { Content } from "./Content"
+
+@ChildEntity()
+export class Post extends Content {
+    @Column()
+    viewCount: number
+}
+```
+
+</CodeGroup>
+
+This creates a single `content` table. The `type` column stores `"Photo"`, `"Question"`, or `"Post"` for each row.
+
+### Custom discriminator values
+
+By default, TypeORM uses the class name as the discriminator value. Pass a custom value to `@ChildEntity()` to override this:
+
+```typescript
+@ChildEntity("photo-v2")
+export class Photo extends Content {
+    @Column()
+    size: string
+}
+```
+
+<Warning>
+  Changing the discriminator value after data has been written will cause existing rows to stop mapping to the correct class. Plan your discriminator values before inserting data.
+</Warning>
+
+## Choosing a strategy
+
+| | Concrete table inheritance | Single table inheritance |
+|---|---|---|
+| **Tables created** | One per concrete entity | One shared table |
+| **Query performance** | Queries touch only the relevant table | All rows in one table; discriminator filtering |
+| **Schema** | Each table has only its own columns | All columns from all subclasses in one table (nullable for columns not shared) |
+| **Joins required** | None for reading a single type | None — all data is in one table |
+| **Best for** | Entities with significantly different column sets | Entities with shared columns and moderate differences |
+
+## Using embedded entities for composition
+
+For reducing duplication without inheritance, consider [embedded entities](/entity/embedded-entities). Embedding uses composition rather than inheritance and gives you more control over column naming.

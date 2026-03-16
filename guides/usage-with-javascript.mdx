@@ -1,0 +1,192 @@
+---
+title: Usage with JavaScript
+description: Use TypeORM in plain JavaScript (CommonJS or ESM) without TypeScript or decorators by defining entities with EntitySchema.
+---
+
+TypeORM works with plain JavaScript as well as TypeScript. Because JavaScript does not support TypeScript decorators, you define your entities using `EntitySchema` — a configuration object that describes the entity's columns and relations.
+
+## Prerequisites
+
+You need Node.js 20 or later. No `tsconfig.json` is required.
+
+## Define entities with `EntitySchema`
+
+`EntitySchema` takes a configuration object that maps directly to what you would express with decorators in TypeScript.
+
+<CodeGroup>
+
+```javascript entity/Category.js
+const { EntitySchema } = require("typeorm")
+
+module.exports = new EntitySchema({
+    name: "Category",
+    tableName: "categories",
+    columns: {
+        id: {
+            primary: true,
+            type: "int",
+            generated: true,
+        },
+        name: {
+            type: "varchar",
+        },
+    },
+})
+```
+
+```javascript entity/Post.js
+const { EntitySchema } = require("typeorm")
+
+module.exports = new EntitySchema({
+    name: "Post",
+    tableName: "posts",
+    columns: {
+        id: {
+            primary: true,
+            type: "int",
+            generated: true,
+        },
+        title: {
+            type: "varchar",
+        },
+        text: {
+            type: "text",
+        },
+    },
+    relations: {
+        categories: {
+            target: "Category",
+            type: "many-to-many",
+            joinTable: true,
+            cascade: true,
+        },
+    },
+})
+```
+
+</CodeGroup>
+
+## Initialize the DataSource
+
+Require `typeorm` and create a `DataSource` instance. Pass the entity schemas in the `entities` array:
+
+```javascript
+var typeorm = require("typeorm")
+
+var dataSource = new typeorm.DataSource({
+    type: "postgres",
+    host: "localhost",
+    port: 5432,
+    username: "test",
+    password: "admin",
+    database: "test",
+    synchronize: true,
+    entities: [
+        require("./entities/Post"),
+        require("./entities/Category"),
+    ],
+})
+
+dataSource
+    .initialize()
+    .then(function () {
+        console.log("Data Source initialized")
+    })
+    .catch(function (error) {
+        console.error("Initialization error:", error)
+    })
+```
+
+## Save and query data
+
+Once the DataSource is initialized, use `getRepository` with the entity name string or the schema object:
+
+```javascript
+dataSource
+    .initialize()
+    .then(function () {
+        var category1 = { name: "TypeScript" }
+        var category2 = { name: "Programming" }
+
+        var post = {
+            title: "Control flow based type analysis",
+            text: "TypeScript 2.0 implements control flow-based type analysis.",
+            categories: [category1, category2],
+        }
+
+        var postRepository = dataSource.getRepository("Post")
+
+        return postRepository
+            .save(post)
+            .then(function (savedPost) {
+                console.log("Saved:", savedPost)
+                return postRepository.find()
+            })
+            .then(function (allPosts) {
+                console.log("All posts:", allPosts)
+            })
+    })
+    .catch(function (error) {
+        console.error("Error:", error)
+    })
+```
+
+## ESM imports
+
+If you are using ES modules (e.g., with `"type": "module"` in `package.json`), use `import` syntax instead of `require`:
+
+```javascript
+import typeorm from "typeorm"
+const { DataSource, EntitySchema } = typeorm
+
+export default new EntitySchema({
+    name: "Post",
+    tableName: "posts",
+    columns: {
+        id: { primary: true, type: "int", generated: true },
+        title: { type: "varchar" },
+        text: { type: "text" },
+    },
+})
+```
+
+## Decorator equivalents in `EntitySchema`
+
+The table below maps common TypeScript decorators to their `EntitySchema` equivalents:
+
+| TypeScript decorator | `EntitySchema` option |
+|---|---|
+| `@PrimaryGeneratedColumn()` | `{ primary: true, type: "int", generated: true }` |
+| `@PrimaryColumn()` | `{ primary: true, type: "varchar" }` |
+| `@Column()` | `{ type: "varchar" }` |
+| `@Column({ nullable: true })` | `{ type: "varchar", nullable: true }` |
+| `@Column({ unique: true })` | `{ type: "varchar", unique: true }` |
+| `@CreateDateColumn()` | `{ type: "timestamp", createDate: true }` |
+| `@UpdateDateColumn()` | `{ type: "timestamp", updateDate: true }` |
+| `@OneToMany(...)` | `{ type: "one-to-many", target: "...", inverseSide: "..." }` |
+| `@ManyToOne(...)` | `{ type: "many-to-one", target: "...", inverseSide: "..." }` |
+| `@ManyToMany(...)` | `{ type: "many-to-many", target: "...", joinTable: true }` |
+
+<Tip>
+You can reference a full working JavaScript example at [typeorm/javascript-example](https://github.com/typeorm/javascript-example) on GitHub.
+</Tip>
+
+## CommonJS vs ESM
+
+<Tabs>
+  <Tab title="CommonJS (require)">
+    The default for most Node.js projects. No extra configuration needed.
+
+    ```javascript
+    const { DataSource } = require("typeorm")
+    ```
+  </Tab>
+  <Tab title="ESM (import)">
+    Set `"type": "module"` in `package.json`, then use named imports from the default export:
+
+    ```javascript
+    import typeorm from "typeorm"
+    const { DataSource } = typeorm
+    ```
+  </Tab>
+</Tabs>

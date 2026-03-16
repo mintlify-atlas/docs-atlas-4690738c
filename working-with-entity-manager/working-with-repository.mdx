@@ -1,0 +1,246 @@
+---
+title: "Working with Repository"
+description: "Use Repository to perform database operations scoped to a single entity type with a clean, type-safe API."
+---
+
+## What is a Repository?
+
+`Repository` is like `EntityManager` but its operations are limited to a single entity type. You get full type inference on every query and no need to pass the entity class as the first argument to every method call.
+
+There are three repository variants:
+
+<Columns cols={3}>
+  <Card title="Repository" icon="database">
+    Standard repository for any entity. Covers all common CRUD and query operations.
+  </Card>
+  <Card title="TreeRepository" icon="sitemap">
+    Extended repository for entities annotated with `@Tree`. Provides tree-specific query methods.
+  </Card>
+  <Card title="MongoRepository" icon="leaf">
+    Repository with MongoDB-specific query methods. Used only with MongoDB data sources.
+  </Card>
+</Columns>
+
+## Getting a repository
+
+Call `getRepository` on your initialized `DataSource` and pass the entity class:
+
+```typescript
+import { AppDataSource } from "./app-data-source"
+import { User } from "./entity/User"
+
+const userRepository = AppDataSource.getRepository(User)
+```
+
+<Tip>
+  Export the repository as a module-level constant so you can reuse it across your application without creating new instances each time.
+</Tip>
+
+```typescript user.repository.ts
+import { AppDataSource } from "./app-data-source"
+import { User } from "./entity/User"
+
+export const UserRepository = AppDataSource.getRepository(User)
+```
+
+## CRUD operations
+
+### Finding entities
+
+<CodeGroup>
+
+```typescript findOneBy
+// Find by primary key or simple condition
+const user = await userRepository.findOneBy({ id: 1 })
+```
+
+```typescript findOne (with options)
+// Find with relations, ordering, or locking
+const user = await userRepository.findOne({
+    where: { email: "timber@example.com" },
+    relations: { profile: true },
+    order: { createdAt: "DESC" },
+})
+```
+
+```typescript find (multiple)
+// Find all active users, newest first
+const users = await userRepository.find({
+    where: { isActive: true },
+    order: { createdAt: "DESC" },
+    take: 20,
+    skip: 0,
+})
+```
+
+```typescript findAndCount
+// Find and count in one query (useful for pagination)
+const [users, total] = await userRepository.findAndCount({
+    where: { isActive: true },
+    take: 10,
+    skip: 0,
+})
+```
+
+</CodeGroup>
+
+### Saving entities
+
+`save` performs an upsert: it issues an `INSERT` for new entities and an `UPDATE` for existing ones (determined by the presence of a primary key value):
+
+```typescript
+// Insert a new user
+const user = userRepository.create({
+    firstName: "Timber",
+    lastName: "Saw",
+    email: "timber@example.com",
+})
+const saved = await userRepository.save(user)
+console.log(saved.id) // populated after insert
+
+// Update an existing user
+const existing = await userRepository.findOneBy({ id: 1 })
+existing.firstName = "Umed"
+await userRepository.save(existing)
+```
+
+Save an array of entities in a single transaction:
+
+```typescript
+await userRepository.save([user1, user2, user3])
+```
+
+### Inserting records
+
+Use `insert` when you always want an `INSERT` and don't need the entity lifecycle (no hooks, no change detection):
+
+```typescript
+await userRepository.insert({
+    firstName: "Timber",
+    lastName: "Saw",
+})
+
+// Bulk insert
+await userRepository.insert([
+    { firstName: "Foo", lastName: "Bar" },
+    { firstName: "Rizz", lastName: "Rak" },
+])
+```
+
+### Updating records
+
+Target specific rows by ID or condition without loading the entity first:
+
+```typescript
+// Update by primary key
+await userRepository.update(1, { firstName: "Rizzrak" })
+// UPDATE user SET firstName = 'Rizzrak' WHERE id = 1
+
+// Update by condition
+await userRepository.update({ isActive: false }, { deletedAt: new Date() })
+```
+
+### Upserting records
+
+`upsert` inserts rows that don't exist and updates rows that do, based on the conflict path columns you specify:
+
+```typescript
+await userRepository.upsert(
+    [
+        { externalId: "abc123", firstName: "Rizzrak" },
+        { externalId: "bca321", firstName: "Karzzir" },
+    ],
+    ["externalId"],
+)
+// INSERT ... ON CONFLICT (externalId) DO UPDATE SET firstName = EXCLUDED.firstName
+```
+
+<Note>
+  `upsert` is supported on PostgreSQL, CockroachDB, MySQL, SQLite, and the Aurora Data API drivers.
+</Note>
+
+### Deleting records
+
+```typescript
+// Delete by primary key
+await userRepository.delete(1)
+await userRepository.delete([1, 2, 3])
+
+// Delete by condition
+await userRepository.delete({ firstName: "Timber" })
+
+// Remove an entity instance (fires lifecycle hooks)
+const user = await userRepository.findOneBy({ id: 1 })
+await userRepository.remove(user)
+```
+
+### Soft deletes and restoration
+
+Entities with a `@DeleteDateColumn` support soft deletion — the row is kept in the database with a timestamp set:
+
+```typescript
+// Soft-delete
+await userRepository.softDelete(1)
+
+// Restore
+await userRepository.restore(1)
+
+// Include soft-deleted rows in results
+const all = await userRepository.find({ withDeleted: true })
+```
+
+## Counting and existence checks
+
+```typescript
+// Count all active users
+const total = await userRepository.count({ where: { isActive: true } })
+
+// Simple condition count
+const adminCount = await userRepository.countBy({ role: "admin" })
+
+// Check whether any row matches
+const exists = await userRepository.existsBy({ email: "timber@example.com" })
+```
+
+## Building queries with QueryBuilder
+
+For complex queries — joins, subqueries, aggregations — use `createQueryBuilder`:
+
+```typescript
+const users = await userRepository
+    .createQueryBuilder("user")
+    .innerJoinAndSelect("user.profile", "profile")
+    .where("user.isActive = :isActive", { isActive: true })
+    .orderBy("user.createdAt", "DESC")
+    .take(10)
+    .getMany()
+```
+
+## Repository vs EntityManager
+
+| | Repository | EntityManager |
+|---|---|---|
+| Entity scope | Single entity type | Any entity type |
+| Method signatures | No entity class argument | Entity class as first argument |
+| Obtaining | `DataSource.getRepository(Entity)` | `DataSource.manager` |
+| Transactions | Use `manager.withRepository()` | Use `manager.transaction()` |
+| Custom methods | Extend via `.extend()` | Not applicable |
+
+Use `Repository` when your code deals with one entity type. Use `EntityManager` when you need to orchestrate operations across multiple entity types in the same place, or when building services that are agnostic to entity type.
+
+## Next steps
+
+<Columns cols={2}>
+  <Card title="Find options" icon="filter" href="/working-with-entity-manager/find-options">
+    All available filter, sort, and pagination options for find methods.
+  </Card>
+  <Card title="Custom repositories" icon="code" href="/working-with-entity-manager/custom-repository">
+    Add domain-specific query methods by extending Repository.
+  </Card>
+  <Card title="Repository API" icon="book" href="/working-with-entity-manager/repository-api">
+    Complete method reference for Repository.
+  </Card>
+  <Card title="Query builder" icon="terminal" href="/query-builder/select-query-builder">
+    Build complex SQL queries with a fluent type-safe API.
+  </Card>
+</Columns>

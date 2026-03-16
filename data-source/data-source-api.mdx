@@ -1,0 +1,370 @@
+---
+title: "DataSource API"
+description: "Complete reference for all public properties and methods on the TypeORM DataSource class."
+---
+
+## Properties
+
+### `options`
+
+The `DataSourceOptions` object used to create this data source.
+
+```typescript
+const options: DataSourceOptions = dataSource.options
+```
+
+### `isInitialized`
+
+Boolean indicating whether the data source has been initialized and a connection pool established.
+
+```typescript
+const isInitialized: boolean = dataSource.isInitialized
+```
+
+### `driver`
+
+The underlying database driver instance.
+
+```typescript
+const driver: Driver = dataSource.driver
+```
+
+### `manager`
+
+The `EntityManager` for this data source. Use it to perform operations on any registered entity.
+
+```typescript
+const manager: EntityManager = dataSource.manager
+const users = await manager.find(User)
+```
+
+### `mongoManager`
+
+The `MongoEntityManager` for MongoDB data sources. Available only when `type` is `"mongodb"`.
+
+```typescript
+const mongoManager: MongoEntityManager = dataSource.mongoManager
+const users = await mongoManager.find(User)
+```
+
+### `sqljsManager`
+
+The `SqljsEntityManager` for sql.js data sources. Available only when `type` is `"sqljs"`.
+
+### `entityMetadatas`
+
+Array of `EntityMetadata` for all entities registered with this data source.
+
+### `migrations`
+
+Array of migration instances registered with this data source.
+
+### `subscribers`
+
+Array of entity subscriber instances registered with this data source.
+
+---
+
+## Lifecycle methods
+
+### `initialize()`
+
+Opens the database connection (or connection pool). Call once at application startup.
+
+```typescript
+await dataSource.initialize()
+```
+
+Returns `Promise<this>`. Throws `CannotConnectAlreadyConnectedError` if already initialized.
+
+### `destroy()`
+
+Closes all connections in the pool. Call during graceful shutdown.
+
+```typescript
+await dataSource.destroy()
+```
+
+Returns `Promise<void>`. Throws `CannotExecuteNotConnectedError` if not initialized.
+
+### `setOptions(options)`
+
+Updates connection options at runtime without reinitializing.
+
+```typescript
+dataSource.setOptions({ logging: true })
+```
+
+Returns `this`. Useful for changing logger or naming strategy at runtime.
+
+---
+
+## Schema methods
+
+### `synchronize(dropBeforeSync?)`
+
+Syncs the database schema with your entity definitions. Called automatically when `synchronize: true` is set.
+
+```typescript
+await dataSource.synchronize()
+
+// Drop all tables first, then recreate
+await dataSource.synchronize(true)
+```
+
+<Warning>
+  Do not call `synchronize()` in production. It may drop columns or tables to
+  match your entity definitions.
+</Warning>
+
+### `dropDatabase()`
+
+Drops the database and all its data. Requires an active connection.
+
+```typescript
+await dataSource.dropDatabase()
+```
+
+<Warning>
+  This permanently deletes all data. Use only in development or test
+  environments.
+</Warning>
+
+---
+
+## Migration methods
+
+### `runMigrations(options?)`
+
+Runs all pending migrations. Returns an array of the migrations that were executed.
+
+```typescript
+const executedMigrations = await dataSource.runMigrations()
+
+// Control transaction mode
+await dataSource.runMigrations({ transaction: "each" })
+
+// Run in fake mode (marks as executed without running)
+await dataSource.runMigrations({ fake: true })
+```
+
+| Option | Type | Default | Description |
+| --- | --- | --- | --- |
+| `transaction` | `"all" \| "none" \| "each"` | `"all"` | Transaction strategy for running migrations. |
+| `fake` | `boolean` | `false` | Mark migrations as executed without running their SQL. |
+
+### `undoLastMigration(options?)`
+
+Reverts the most recently executed migration.
+
+```typescript
+await dataSource.undoLastMigration()
+
+await dataSource.undoLastMigration({ transaction: "each", fake: true })
+```
+
+### `showMigrations()`
+
+Lists all migrations and their execution status. Returns `true` if there are pending (not-yet-run) migrations.
+
+```typescript
+const hasPending: boolean = await dataSource.showMigrations()
+```
+
+---
+
+## Metadata methods
+
+### `hasMetadata(target)`
+
+Returns `true` if entity metadata is registered for the given entity class or table name.
+
+```typescript
+if (dataSource.hasMetadata(User)) {
+    const metadata = dataSource.getMetadata(User)
+}
+```
+
+### `getMetadata(target)`
+
+Returns the `EntityMetadata` for the given entity. Throws `EntityMetadataNotFoundError` if not found.
+
+```typescript
+const userMetadata = dataSource.getMetadata(User)
+// userMetadata.tableName, userMetadata.columns, etc.
+```
+
+### `getManyToManyMetadata(entityTarget, relationPropertyPath)`
+
+Returns the junction table `EntityMetadata` for a many-to-many relation.
+
+```typescript
+const junctionMetadata = dataSource.getManyToManyMetadata(Post, "categories")
+```
+
+---
+
+## Repository methods
+
+### `getRepository(target)`
+
+Returns a `Repository` for the given entity. You can pass either the entity class or its table name.
+
+```typescript
+const userRepository = dataSource.getRepository(User)
+const users = await userRepository.find()
+```
+
+### `getTreeRepository(target)`
+
+Returns a `TreeRepository` for the given entity. Only entities decorated with `@Tree()` support this.
+
+```typescript
+const categoryRepository = dataSource.getTreeRepository(Category)
+const tree = await categoryRepository.findTrees()
+```
+
+### `getMongoRepository(target)`
+
+Returns a `MongoRepository` for the given entity. Available only on MongoDB data sources.
+
+```typescript
+const userRepository = dataSource.getMongoRepository(User)
+const cursor = userRepository.createEntityCursor()
+```
+
+---
+
+## Query methods
+
+### `query(sql, parameters?, queryRunner?)`
+
+Executes a raw SQL query. Returns the raw database result.
+
+<CodeGroup>
+
+```typescript MySQL / MariaDB
+const results = await dataSource.query(
+    "SELECT * FROM users WHERE name = ? AND age = ?",
+    ["John", 24],
+)
+```
+
+```typescript PostgreSQL / CockroachDB
+const results = await dataSource.query(
+    "SELECT * FROM users WHERE name = $1 AND age = $2",
+    ["John", 24],
+)
+```
+
+```typescript SQL Server
+const results = await dataSource.query(
+    "SELECT * FROM users WHERE name = @0 AND age = @1",
+    ["John", 24],
+)
+```
+
+```typescript Oracle
+const results = await dataSource.query(
+    "SELECT * FROM users WHERE name = :1 AND age = :2",
+    ["John", 24],
+)
+```
+
+```typescript Spanner
+const results = await dataSource.query(
+    "SELECT * FROM users WHERE name = @param0 AND age = @param1",
+    ["John", 24],
+)
+```
+
+</CodeGroup>
+
+Not supported on MongoDB.
+
+### `sql` (tagged template)
+
+Executes a raw SQL query using a tagged template literal. Parameters are extracted automatically and passed as driver-specific placeholders.
+
+```typescript
+const users = await dataSource.sql`
+    SELECT * FROM users WHERE name = ${"John"} AND age = ${24}
+`
+```
+
+<Note>
+  Use `` dataSource.sql`...` `` as a tagged template, not as a regular function
+  call. See [SQL Tag syntax](/guides/sql-tag) for full details.
+</Note>
+
+### `transaction(runInTransaction)` / `transaction(isolationLevel, runInTransaction)`
+
+Wraps a set of operations in a single database transaction. The provided function receives a dedicated `EntityManager` — all operations inside must use that manager.
+
+```typescript
+await dataSource.transaction(async (manager) => {
+    const user = manager.create(User, { firstName: "Alice" })
+    await manager.save(user)
+
+    const post = manager.create(Post, { title: "Hello", author: user })
+    await manager.save(post)
+})
+
+// With an explicit isolation level
+await dataSource.transaction("SERIALIZABLE", async (manager) => {
+    // ...
+})
+```
+
+See [Transactions](/advanced-topics/transactions) for detailed guidance.
+
+### `createQueryBuilder(entityClass?, alias?, queryRunner?)`
+
+Creates a `SelectQueryBuilder`. Pass an entity class and alias to start a typed query, or call with no arguments for a generic builder.
+
+```typescript
+// Typed query builder
+const users = await dataSource
+    .createQueryBuilder(User, "user")
+    .where("user.isActive = :active", { active: true })
+    .orderBy("user.lastName", "ASC")
+    .getMany()
+
+// Generic builder
+const result = await dataSource
+    .createQueryBuilder()
+    .select()
+    .from(User, "user")
+    .where("user.firstName = :name", { name: "John" })
+    .getMany()
+```
+
+Not supported on MongoDB.
+
+### `createQueryRunner(mode?)`
+
+Creates a `QueryRunner` for manual connection and transaction control. The `mode` parameter selects the replication pool (`"master"` or `"slave"`).
+
+```typescript
+const queryRunner = dataSource.createQueryRunner()
+
+await queryRunner.connect()
+
+try {
+    await queryRunner.startTransaction()
+    await queryRunner.query("INSERT INTO users (name) VALUES ($1)", ["Alice"])
+    await queryRunner.commitTransaction()
+} catch (error) {
+    await queryRunner.rollbackTransaction()
+    throw error
+} finally {
+    await queryRunner.release()
+}
+```
+
+<Warning>
+  Always call `queryRunner.release()` when finished. Unreleased runners keep
+  a connection checked out of the pool indefinitely.
+</Warning>
+
+See [Query Runner](/query-runner) for the full QueryRunner API.

@@ -1,0 +1,597 @@
+---
+title: "Entities"
+description: "Define database tables as TypeScript classes using the @Entity decorator and map columns with property decorators."
+---
+
+## What is an entity?
+
+An entity is a class that maps to a database table (or collection when using MongoDB). Mark a class with `@Entity()` and TypeORM will manage its schema:
+
+```typescript user.entity.ts
+import { Entity, PrimaryGeneratedColumn, Column } from "typeorm"
+
+@Entity()
+export class User {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    @Column()
+    firstName: string
+
+    @Column()
+    lastName: string
+
+    @Column()
+    isActive: boolean
+}
+```
+
+This produces the following table:
+
+```
++-------------+--------------+----------------------------+
+|                          user                           |
++-------------+--------------+----------------------------+
+| id          | int          | PRIMARY KEY AUTO_INCREMENT |
+| firstName   | varchar(255) |                            |
+| lastName    | varchar(255) |                            |
+| isActive    | boolean      |                            |
++-------------+--------------+----------------------------+
+```
+
+<Note>
+  Every entity **must** have at least one primary column. When using MongoDB, use `ObjectId` instead.
+</Note>
+
+## Registering entities
+
+Each entity must be registered in your `DataSource` configuration before TypeORM can use it.
+
+<Tabs>
+  <Tab title="Individual entities">
+    ```typescript app-data-source.ts
+    import { DataSource } from "typeorm"
+    import { User } from "./entities/User"
+
+    const AppDataSource = new DataSource({
+        type: "mysql",
+        host: "localhost",
+        port: 3306,
+        username: "test",
+        password: "test",
+        database: "test",
+        entities: [User],
+    })
+    ```
+  </Tab>
+  <Tab title="Glob pattern">
+    ```typescript app-data-source.ts
+    import { DataSource } from "typeorm"
+
+    const AppDataSource = new DataSource({
+        type: "mysql",
+        host: "localhost",
+        port: 3306,
+        username: "test",
+        password: "test",
+        database: "test",
+        entities: [__dirname + "/entities/**/*{.js,.ts}"],
+    })
+    ```
+  </Tab>
+</Tabs>
+
+## @Entity options
+
+Pass a custom table name as the first argument, or use the options object:
+
+```typescript
+// Custom table name
+@Entity("my_users")
+export class User { ... }
+
+// Options object
+@Entity({ name: "my_users", schema: "app", synchronize: false })
+export class User { ... }
+```
+
+<ParamField path="name" type="string">
+  Table name in the database. Defaults to the lowercased class name.
+</ParamField>
+
+<ParamField path="schema" type="string">
+  Schema name for databases that support schemas (e.g., PostgreSQL).
+</ParamField>
+
+<ParamField path="database" type="string">
+  Database name on the selected database server.
+</ParamField>
+
+<ParamField path="engine" type="string">
+  The database engine to use for the table. MySQL only.
+</ParamField>
+
+<ParamField path="synchronize" type="boolean" default="true">
+  When `false`, schema synchronization is skipped for this entity.
+</ParamField>
+
+<ParamField path="orderBy" type="object">
+  Default ordering applied when querying this entity with `find`.
+</ParamField>
+
+<ParamField path="withoutRowid" type="boolean">
+  Create the table `WITHOUT ROWID`. SQLite only.
+</ParamField>
+
+<ParamField path="comment" type="string">
+  A comment added to the table definition in the database.
+</ParamField>
+
+<Tip>
+  Set a global table prefix for all entities with the `entityPrefix` option in your `DataSource` configuration.
+</Tip>
+
+## Primary columns
+
+Every entity needs at least one primary column. TypeORM provides three primary column decorators:
+
+<AccordionGroup>
+  <Accordion title="@PrimaryColumn">
+    Creates a primary column of any type. You must assign the value manually before saving.
+
+    ```typescript
+    import { Entity, PrimaryColumn } from "typeorm"
+
+    @Entity()
+    export class User {
+        @PrimaryColumn()
+        id: number
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="@PrimaryGeneratedColumn (increment)">
+    Creates an auto-incrementing integer primary column. The database generates the value — you never assign it manually.
+
+    ```typescript
+    import { Entity, PrimaryGeneratedColumn } from "typeorm"
+
+    @Entity()
+    export class User {
+        @PrimaryGeneratedColumn()
+        id: number
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="@PrimaryGeneratedColumn (uuid)">
+    Creates a UUID primary column. The value is automatically generated as a unique string.
+
+    ```typescript
+    import { Entity, PrimaryGeneratedColumn } from "typeorm"
+
+    @Entity()
+    export class User {
+        @PrimaryGeneratedColumn("uuid")
+        id: string
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Composite primary keys">
+    Apply `@PrimaryColumn` to multiple properties to form a composite primary key.
+
+    ```typescript
+    import { Entity, PrimaryColumn } from "typeorm"
+
+    @Entity()
+    export class UserRole {
+        @PrimaryColumn()
+        userId: number
+
+        @PrimaryColumn()
+        roleId: number
+    }
+    ```
+
+    Find by composite key:
+
+    ```typescript
+    const userRole = await dataSource.getRepository(UserRole).findOneBy({
+        userId: 1,
+        roleId: 2,
+    })
+    ```
+  </Accordion>
+</AccordionGroup>
+
+`@PrimaryGeneratedColumn` supports four generation strategies:
+
+| Strategy | Description |
+|---|---|
+| `"increment"` (default) | Auto-increment integer. Uses `AUTO_INCREMENT`, `SERIAL`, or `SEQUENCE` depending on the database. |
+| `"uuid"` | Generates a UUID string. |
+| `"identity"` | Uses SQL `IDENTITY` column. PostgreSQL 10+ only. |
+| `"rowid"` | Uses CockroachDB `rowid`. |
+
+## Regular columns
+
+Mark any class property with `@Column()` to persist it to the database. TypeORM infers the column type from the TypeScript type when `emitDecoratorMetadata` is enabled:
+
+```typescript
+@Column()
+title: string // inferred as varchar
+
+@Column()
+count: number // inferred as int
+
+@Column()
+isPublished: boolean // inferred as boolean
+```
+
+Specify the column type explicitly:
+
+```typescript
+// Type as first argument
+@Column("text")
+content: string
+
+// Type in options object
+@Column({ type: "varchar", length: 200 })
+title: string
+```
+
+## Special columns
+
+These decorators create columns that TypeORM manages automatically:
+
+<Columns cols={2}>
+  <Card title="@CreateDateColumn">
+    Automatically set to the timestamp when the entity is first inserted. Never set this value manually.
+  </Card>
+  <Card title="@UpdateDateColumn">
+    Automatically updated to the current timestamp on every `save()` call and during `upsert` updates.
+  </Card>
+  <Card title="@DeleteDateColumn">
+    Set when `softDelete()` is called. Entities with a non-null delete date are excluded from queries by default.
+  </Card>
+  <Card title="@VersionColumn">
+    An integer that increments on every `save()` call and during `upsert` updates. Useful for optimistic locking.
+  </Card>
+</Columns>
+
+```typescript user.entity.ts
+import {
+    Entity,
+    PrimaryGeneratedColumn,
+    Column,
+    CreateDateColumn,
+    UpdateDateColumn,
+    DeleteDateColumn,
+    VersionColumn,
+} from "typeorm"
+
+@Entity()
+export class User {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    @Column()
+    name: string
+
+    @CreateDateColumn()
+    createdAt: Date
+
+    @UpdateDateColumn()
+    updatedAt: Date
+
+    @DeleteDateColumn()
+    deletedAt: Date
+
+    @VersionColumn()
+    version: number
+}
+```
+
+## Column types
+
+TypeORM supports the full range of database-specific column types. Pass the type as a string:
+
+```typescript
+@Column("int")
+@Column("varchar")
+@Column("text")
+@Column("boolean")
+@Column("timestamp")
+@Column("json")
+@Column("float")
+@Column("decimal")
+```
+
+<Note>
+  `bigint` columns do not fit into JavaScript's `number` type. TypeORM maps `bigint` to `string` automatically.
+</Note>
+
+### enum columns
+
+Supported on PostgreSQL and MySQL. You can use a TypeScript enum or a plain string array:
+
+<CodeGroup>
+
+```typescript TypeScript enum
+export enum UserRole {
+    ADMIN = "admin",
+    EDITOR = "editor",
+    GHOST = "ghost",
+}
+
+@Entity()
+export class User {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    @Column({
+        type: "enum",
+        enum: UserRole,
+        default: UserRole.GHOST,
+    })
+    role: UserRole
+}
+```
+
+```typescript String array
+export type UserRoleType = "admin" | "editor" | "ghost"
+
+@Entity()
+export class User {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    @Column({
+        type: "enum",
+        enum: ["admin", "editor", "ghost"],
+        default: "ghost",
+    })
+    role: UserRoleType
+}
+```
+
+</CodeGroup>
+
+### simple-array columns
+
+Stores a primitive array as a comma-separated string in a single column. Values are deserialized back to an array on read.
+
+```typescript
+@Entity()
+export class User {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    @Column("simple-array")
+    names: string[]
+}
+
+const user = new User()
+user.names = ["Alexander", "Alex", "Sasha"]
+// Stored as: "Alexander,Alex,Sasha"
+```
+
+<Warning>
+  Do not include commas in values stored in a `simple-array` column — they are used as the separator.
+</Warning>
+
+### simple-json columns
+
+Serializes any value to JSON using `JSON.stringify` and deserializes it with `JSON.parse`. Useful on databases without a native JSON type.
+
+```typescript
+@Entity()
+export class User {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    @Column("simple-json")
+    profile: { name: string; nickname: string }
+}
+
+const user = new User()
+user.profile = { name: "John", nickname: "Malkovich" }
+// Stored as: {"name":"John","nickname":"Malkovich"}
+```
+
+### Vector columns
+
+Supported on MariaDB/MySQL, Microsoft SQL Server, PostgreSQL (via the `pgvector` extension), and SAP HANA Cloud. Use for storing vector embeddings for similarity search and ML applications.
+
+```typescript post.entity.ts
+@Entity()
+export class Post {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    // Vector without specified dimensions
+    @Column("vector")
+    embedding: number[] | Buffer
+
+    // 3-dimensional vector
+    @Column("vector", { length: 3 })
+    embedding3d: number[] | Buffer
+
+    // Half-precision vector (PostgreSQL and SAP HANA only)
+    @Column("halfvec", { length: 4 })
+    halfvecEmbedding: number[] | Buffer
+}
+```
+
+| Type | Description |
+|---|---|
+| `vector` | 4-byte float (single precision). Supported on MySQL/MariaDB, SQL Server, PostgreSQL, SAP HANA. |
+| `halfvec` | 2-byte float (half precision). PostgreSQL and SAP HANA only. |
+
+<Note>
+  PostgreSQL vector columns require the `pgvector` extension. MySQL/MariaDB requires 11.7+ / MySQL 9+. SQL Server requires SQL Server 2025 (17.x) or newer.
+</Note>
+
+### Spatial columns
+
+SQL Server, MySQL/MariaDB, PostgreSQL/CockroachDB, and SAP HANA support spatial column types. On SQL Server, MySQL/MariaDB, and SAP HANA, geometries use the [Well-Known Text (WKT)](https://en.wikipedia.org/wiki/Well-known_text) format as strings:
+
+```typescript thing.entity.ts
+import { Entity, PrimaryColumn, Column } from "typeorm"
+
+@Entity()
+export class Thing {
+    @PrimaryColumn()
+    id: number
+
+    @Column("point")
+    point: string
+
+    @Column("linestring")
+    linestring: string
+}
+
+const thing = new Thing()
+thing.point = "POINT(1 1)"
+thing.linestring = "LINESTRING(0 0,1 1,2 2)"
+```
+
+### Columns with generated values
+
+Use `@Generated` to attach a generation strategy to any non-primary column:
+
+```typescript
+import { Entity, PrimaryColumn, Column, Generated } from "typeorm"
+
+@Entity()
+export class User {
+    @PrimaryColumn()
+    id: number
+
+    @Column()
+    @Generated("uuid")
+    uuid: string
+}
+```
+
+Available strategies for `@Generated`: `"uuid"`, `"increment"`, `"identity"` (PostgreSQL 10+ only), `"rowid"` (CockroachDB only).
+
+## Column options
+
+Pass an options object to `@Column()` to configure additional behavior:
+
+```typescript
+@Column({
+    type: "varchar",
+    length: 150,
+    unique: true,
+    nullable: false,
+    default: "anonymous",
+})
+name: string
+```
+
+<ParamField path="type" type="ColumnType">
+  Column type. One of the database-specific type strings (e.g., `"varchar"`, `"int"`, `"text"`, `"enum"`).
+</ParamField>
+
+<ParamField path="name" type="string">
+  Column name in the database table. Defaults to the property name.
+</ParamField>
+
+<ParamField path="length" type="number">
+  Column type length. For example, `varchar(150)` uses `type: "varchar", length: 150`.
+</ParamField>
+
+<ParamField path="nullable" type="boolean" default="false">
+  Allows `NULL` values. By default, columns are `NOT NULL`.
+</ParamField>
+
+<ParamField path="default" type="string">
+  Database-level `DEFAULT` value expression.
+</ParamField>
+
+<ParamField path="unique" type="boolean" default="false">
+  Adds a unique constraint to the column.
+</ParamField>
+
+<ParamField path="primary" type="boolean" default="false">
+  Marks the column as a primary key. Same as using `@PrimaryColumn`.
+</ParamField>
+
+<ParamField path="select" type="boolean" default="true">
+  When `false`, the column is excluded from query results unless explicitly selected.
+</ParamField>
+
+<ParamField path="insert" type="boolean" default="true">
+  When `false`, the column value is not set on first insert.
+</ParamField>
+
+<ParamField path="update" type="boolean" default="true">
+  When `false`, the column value is not updated by `save()` after the initial insert.
+</ParamField>
+
+<ParamField path="comment" type="string">
+  Database column comment. Not supported on all database types.
+</ParamField>
+
+<ParamField path="precision" type="number">
+  Total number of significant digits for decimal columns.
+</ParamField>
+
+<ParamField path="scale" type="number">
+  Number of digits to the right of the decimal point. Must not exceed `precision`.
+</ParamField>
+
+<ParamField path="unsigned" type="boolean">
+  Adds `UNSIGNED` attribute to a numeric column. MySQL only.
+</ParamField>
+
+<ParamField path="charset" type="string">
+  Column character set. Not supported on all databases.
+</ParamField>
+
+<ParamField path="collation" type="string">
+  Column collation.
+</ParamField>
+
+<ParamField path="enum" type="string[] | AnyEnum">
+  List of allowed values for `enum` column type. Accepts a string array or a TypeScript enum.
+</ParamField>
+
+<ParamField path="enumName" type="string">
+  Name of the enum type in the database. Useful when multiple columns share the same enum.
+</ParamField>
+
+<ParamField path="array" type="boolean">
+  Enables array type for PostgreSQL and CockroachDB (e.g., `int[]`).
+</ParamField>
+
+<ParamField path="transformer" type="object">
+  A `{ from, to }` object for marshalling values between entity and database types. Arrays of transformers are applied in order on write and in reverse on read.
+</ParamField>
+
+<ParamField path="onUpdate" type="string">
+  SQL `ON UPDATE` trigger expression. MySQL only.
+</ParamField>
+
+<ParamField path="asExpression" type="string">
+  Generated column expression. MySQL only.
+</ParamField>
+
+<ParamField path="generatedType" type="'VIRTUAL' | 'STORED'">
+  Generated column type (`VIRTUAL` or `STORED`). MySQL only.
+</ParamField>
+
+<ParamField path="hstoreType" type="'object' | 'string'">
+  Return type for `hstore` columns. PostgreSQL only.
+</ParamField>
+
+<ParamField path="utc" type="boolean" default="false">
+  Store and retrieve `date` column values in UTC instead of local timezone.
+</ParamField>
+
+<Note>
+  Most column options are RDBMS-specific and are not available when using MongoDB.
+</Note>

@@ -1,0 +1,557 @@
+---
+title: "Repository API"
+description: "Complete method reference for TypeORM Repository, the entity-scoped interface for all database operations."
+---
+
+## Properties
+
+<ParamField path="manager" type="EntityManager">
+  The `EntityManager` used by this repository.
+
+  ```typescript
+  const manager = repository.manager
+  ```
+</ParamField>
+
+<ParamField path="metadata" type="EntityMetadata">
+  Metadata about the entity managed by this repository (table name, columns, relations, and so on).
+
+  ```typescript
+  const metadata = repository.metadata
+  ```
+</ParamField>
+
+<ParamField path="target" type="EntityTarget<Entity>">
+  The entity class (or schema name) managed by this repository.
+
+  ```typescript
+  const target = repository.target // e.g., User
+  ```
+</ParamField>
+
+<ParamField path="queryRunner" type="QueryRunner | undefined">
+  The query runner used by this repository. Defined only on transactional repository instances.
+
+  ```typescript
+  const queryRunner = repository.queryRunner
+  ```
+</ParamField>
+
+---
+
+## Querying
+
+### find
+
+Finds entities matching `FindManyOptions`. Returns an empty array when no matches are found.
+
+```typescript
+const users = await userRepository.find({
+    where: { isActive: true },
+    order: { createdAt: "DESC" },
+    take: 20,
+    skip: 0,
+})
+```
+
+### findBy
+
+Finds entities matching `FindOptionsWhere`. A simpler alternative to `find` when you only need equality conditions.
+
+```typescript
+const timbers = await userRepository.findBy({ firstName: "Timber" })
+```
+
+### findOne
+
+Returns the first entity matching `FindOneOptions`, or `null`.
+
+```typescript
+const user = await userRepository.findOne({
+    where: { email: "timber@example.com" },
+    relations: { profile: true },
+})
+```
+
+### findOneBy
+
+Returns the first entity matching `FindOptionsWhere`, or `null`.
+
+```typescript
+const user = await userRepository.findOneBy({ id: 1 })
+```
+
+### findOneOrFail
+
+Same as `findOne` but throws `EntityNotFoundError` if no entity is found.
+
+```typescript
+const user = await userRepository.findOneOrFail({
+    where: { id: 1 },
+})
+```
+
+### findOneByOrFail
+
+Same as `findOneBy` but throws `EntityNotFoundError` if no entity is found.
+
+```typescript
+const user = await userRepository.findOneByOrFail({ id: 1 })
+```
+
+### findAndCount
+
+Finds entities matching `FindManyOptions` and returns a `[entities, totalCount]` tuple. The count ignores `skip`/`take` and represents the full matching set.
+
+```typescript
+const [users, total] = await userRepository.findAndCount({
+    where: { isActive: true },
+    take: 10,
+    skip: 0,
+})
+```
+
+### findAndCountBy
+
+Same as `findAndCount` but accepts `FindOptionsWhere`.
+
+```typescript
+const [timbers, count] = await userRepository.findAndCountBy({
+    firstName: "Timber",
+})
+```
+
+---
+
+## Counting and existence
+
+### count
+
+Counts entities matching `FindOptions`.
+
+```typescript
+const count = await userRepository.count({
+    where: { isActive: true },
+})
+```
+
+### countBy
+
+Counts entities matching `FindOptionsWhere`.
+
+```typescript
+const count = await userRepository.countBy({ firstName: "Timber" })
+```
+
+### exists
+
+Returns `true` if at least one entity matches `FindOptions`.
+
+```typescript
+const exists = await userRepository.exists({
+    where: { email: "timber@example.com" },
+})
+```
+
+### existsBy
+
+Returns `true` if at least one entity matches `FindOptionsWhere`.
+
+```typescript
+const exists = await userRepository.existsBy({ firstName: "Timber" })
+```
+
+---
+
+## Aggregate functions
+
+### sum
+
+Returns the sum of a numeric column for all rows matching `FindOptionsWhere`.
+
+```typescript
+const totalAge = await userRepository.sum("age", { isActive: true })
+```
+
+### average
+
+Returns the average of a numeric column for all rows matching `FindOptionsWhere`.
+
+```typescript
+const avgAge = await userRepository.average("age", { isActive: true })
+```
+
+### minimum
+
+Returns the minimum value of a numeric column for all rows matching `FindOptionsWhere`.
+
+```typescript
+const minAge = await userRepository.minimum("age", { isActive: true })
+```
+
+### maximum
+
+Returns the maximum value of a numeric column for all rows matching `FindOptionsWhere`.
+
+```typescript
+const maxAge = await userRepository.maximum("age", { isActive: true })
+```
+
+---
+
+## Persistence
+
+### save
+
+Saves an entity or array of entities. Issues `INSERT` for new entities and `UPDATE` for existing ones (presence of a primary key determines which). Undefined properties are skipped.
+
+```typescript
+await userRepository.save(user)
+await userRepository.save([user1, user2, user3])
+```
+
+Optional `SaveOptions`:
+
+<ParamField path="data" type="any">
+  Additional data passed to subscribers.
+</ParamField>
+
+<ParamField path="listeners" type="boolean" default="true">
+  When `false`, entity listeners and subscribers are not called.
+</ParamField>
+
+<ParamField path="transaction" type="boolean" default="true">
+  When `false`, the operation is not wrapped in a transaction.
+</ParamField>
+
+<ParamField path="chunk" type="number">
+  Split large arrays into batches of this size. Useful when the driver has a parameter count limit.
+
+  ```typescript
+  await userRepository.save(users, { chunk: 1000 })
+  ```
+</ParamField>
+
+<ParamField path="reload" type="boolean" default="true">
+  After insert/update, reload the entity from the database. Disable on databases that support `RETURNING` to avoid the extra round-trip.
+</ParamField>
+
+### insert
+
+Inserts a new entity or array of entities. Always runs `INSERT` — no change detection or lifecycle hooks.
+
+```typescript
+await userRepository.insert({ firstName: "Timber", lastName: "Saw" })
+
+await userRepository.insert([
+    { firstName: "Foo", lastName: "Bar" },
+    { firstName: "Rizz", lastName: "Rak" },
+])
+```
+
+### update
+
+Updates rows matching the given criteria. Issues a direct `UPDATE` without loading entities.
+
+```typescript
+// Update by primary key
+await userRepository.update(1, { firstName: "Rizzrak" })
+
+// Update by condition
+await userRepository.update({ isActive: false }, { archivedAt: new Date() })
+```
+
+Request returned values on supported drivers (PostgreSQL, MSSQL):
+
+```typescript
+const result = await userRepository.update(
+    1,
+    { firstName: "Rizzrak" },
+    { returning: ["id", "firstName"] },
+)
+console.log(result.raw) // [{ id: 1, firstName: "Rizzrak" }]
+```
+
+OR multiple conditions:
+
+```typescript
+await userRepository.update(
+    [{ status: "expired" }, { flagged: true }],
+    { active: false },
+)
+// UPDATE user SET active = false WHERE status = 'expired' OR flagged = true
+```
+
+### updateAll
+
+Updates **all** rows without a `WHERE` clause.
+
+```typescript
+await userRepository.updateAll({ category: "ADULT" })
+// UPDATE user SET category = 'ADULT'
+```
+
+<Warning>
+  `updateAll` issues an unconditional `UPDATE`. Every row in the table will be affected.
+</Warning>
+
+### upsert
+
+Inserts rows that don't exist and updates rows that do, keyed on the specified conflict columns. Supported on PostgreSQL, CockroachDB, MySQL, SQLite, and the Aurora Data API.
+
+```typescript
+await userRepository.upsert(
+    [
+        { externalId: "abc123", firstName: "Rizzrak" },
+        { externalId: "bca321", firstName: "Karzzir" },
+    ],
+    ["externalId"],
+)
+```
+
+Advanced options:
+
+```typescript
+await userRepository.upsert(
+    [{ externalId: "abc123", firstName: "Rizzrak", dateAdded: "2020-01-01" }],
+    {
+        conflictPaths: ["externalId"],
+        skipUpdateIfNoValuesChanged: true, // PostgreSQL only
+        indexPredicate: "dateAdded > 2020-01-01", // partial index, PostgreSQL only
+    },
+)
+```
+
+Request returned values:
+
+```typescript
+const { raw } = await userRepository.upsert(
+    { externalId: "abc123", firstName: "Rizzrak" },
+    { conflictPaths: ["externalId"], returning: ["externalId", "firstName"] },
+)
+console.log(raw) // [{ externalId: "abc123", firstName: "Rizzrak" }]
+```
+
+### remove
+
+Removes an entity or array of entities. Fires lifecycle hooks (`@BeforeRemove`, `@AfterRemove`). Returns the removed entity.
+
+```typescript
+await userRepository.remove(user)
+await userRepository.remove([user1, user2, user3])
+```
+
+Optional `RemoveOptions` (same fields as `SaveOptions`: `data`, `listeners`, `transaction`, `chunk`):
+
+```typescript
+await userRepository.remove(users, { chunk: 1000 })
+```
+
+### delete
+
+Deletes rows by primary key, array of primary keys, or condition object. Does not fire lifecycle hooks.
+
+```typescript
+await userRepository.delete(1)
+await userRepository.delete([1, 2, 3])
+await userRepository.delete({ firstName: "Timber" })
+```
+
+### deleteAll
+
+Deletes **all** rows without a `WHERE` clause.
+
+```typescript
+await userRepository.deleteAll()
+// DELETE FROM user
+```
+
+### softDelete
+
+Soft-deletes rows by setting the `@DeleteDateColumn`. Supports individual IDs, arrays, conditions, or an array of condition objects.
+
+```typescript
+await userRepository.softDelete(1)
+await userRepository.softDelete([1, 2, 3])
+await userRepository.softDelete({ firstName: "Jake" })
+
+// Multiple condition sets
+await userRepository.softDelete([{ firstName: "Jake" }, { age: 25 }])
+```
+
+### restore
+
+Restores soft-deleted rows by clearing the `@DeleteDateColumn`.
+
+```typescript
+await userRepository.restore(1)
+await userRepository.restore({ firstName: "Timber" })
+```
+
+### softRemove
+
+Soft-removes entity instances. Takes entity objects rather than IDs or conditions. Returns the soft-removed entities.
+
+```typescript
+const entities = await userRepository.find()
+const softRemoved = await userRepository.softRemove(entities)
+```
+
+### recover
+
+Restores entities that were soft-removed via `softRemove`. Takes entity objects.
+
+```typescript
+await userRepository.recover(softRemovedEntities)
+```
+
+---
+
+## Entity construction
+
+### create
+
+Creates a new entity instance. Copies only properties present in the entity schema.
+
+```typescript
+const user = userRepository.create()
+// same as: const user = new User()
+
+const user = userRepository.create({
+    id: 1,
+    firstName: "Timber",
+    lastName: "Saw",
+})
+```
+
+### merge
+
+Merges multiple partial objects into an existing entity instance.
+
+```typescript
+const user = new User()
+userRepository.merge(user, { firstName: "Timber" }, { lastName: "Saw" })
+```
+
+### preload
+
+Loads the entity from the database using the ID in the provided object, then merges the provided values over the loaded entity. Returns `undefined` if no entity with that ID is found.
+
+```typescript
+const partialUser = { id: 1, firstName: "Rizzrak", profile: { id: 1 } }
+const user = await userRepository.preload(partialUser)
+// user has all DB properties with firstName overridden to "Rizzrak"
+```
+
+### hasId
+
+Returns `true` if the entity has its primary column property defined.
+
+```typescript
+if (userRepository.hasId(user)) {
+    // entity has a primary key value
+}
+```
+
+### getId
+
+Returns the primary key value(s) of the entity. Returns an object for composite primary keys.
+
+```typescript
+const userId = userRepository.getId(user) // e.g., 1
+```
+
+---
+
+## Atomic updates
+
+### increment
+
+Increments a numeric column by the given amount for all rows matching the condition.
+
+```typescript
+await userRepository.increment({ firstName: "Timber" }, "age", 3)
+// UPDATE user SET age = age + 3 WHERE firstName = 'Timber'
+```
+
+### decrement
+
+Decrements a numeric column by the given amount for all rows matching the condition.
+
+```typescript
+await userRepository.decrement({ firstName: "Timber" }, "age", 3)
+// UPDATE user SET age = age - 3 WHERE firstName = 'Timber'
+```
+
+---
+
+## Queries and builders
+
+### createQueryBuilder
+
+Creates a `SelectQueryBuilder` for this entity. Pass an optional alias; defaults to the entity name.
+
+```typescript
+const users = await userRepository
+    .createQueryBuilder("user")
+    .innerJoinAndSelect("user.profile", "profile")
+    .where("user.isActive = :isActive", { isActive: true })
+    .getMany()
+```
+
+### query
+
+Executes a raw SQL query. Parameter syntax depends on the driver:
+
+<CodeGroup>
+
+```typescript MySQL / SQLite / MariaDB
+const result = await userRepository.query(
+    "SELECT * FROM users WHERE name = ? AND age = ?",
+    ["John", 24],
+)
+```
+
+```typescript PostgreSQL / CockroachDB
+const result = await userRepository.query(
+    "SELECT * FROM users WHERE name = $1 AND age = $2",
+    ["John", 24],
+)
+```
+
+```typescript MSSQL
+const result = await userRepository.query(
+    "SELECT * FROM users WHERE name = @0 AND age = @1",
+    ["John", 24],
+)
+```
+
+</CodeGroup>
+
+---
+
+## Table operations
+
+### clear
+
+Truncates the table (removes all rows). Faster than `deleteAll` but may not be transactional on all databases.
+
+```typescript
+await userRepository.clear()
+
+// Cascade truncation (PostgreSQL/CockroachDB and Oracle only)
+await userRepository.clear({ cascade: true })
+```
+
+---
+
+## Related repository types
+
+<Columns cols={2}>
+  <Card title="TreeRepository" icon="sitemap" href="/entity/tree-entities">
+    For entities annotated with `@Tree`. Adds methods like `findTrees`, `findRoots`, `findDescendants`, and `findAncestors`.
+  </Card>
+  <Card title="MongoRepository" icon="leaf" href="/drivers/mongodb">
+    MongoDB-specific repository with methods for document queries, aggregation, and MongoDB-specific operations.
+  </Card>
+</Columns>

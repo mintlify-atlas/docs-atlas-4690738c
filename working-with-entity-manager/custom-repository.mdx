@@ -1,0 +1,146 @@
+---
+title: "Custom repositories"
+description: "Add domain-specific query methods to your repositories by extending the Repository class using the .extend() method."
+---
+
+## What is a custom repository?
+
+A custom repository extends `Repository` with methods that are specific to your domain. Instead of scattering complex queries across service files, you encapsulate them in a repository class so callers work with a clean, named API.
+
+For example, rather than repeating a `createQueryBuilder` call every time you need to find users by name, you create a `findByName` method on `UserRepository` and call it as `UserRepository.findByName("Timber", "Saw")`.
+
+## Creating a custom repository
+
+Call `.extend()` on a repository instance and pass an object containing your custom methods. Inside the methods, `this` refers to the repository itself, giving you access to all standard repository methods and `createQueryBuilder`.
+
+<Steps>
+  <Step title="Get the base repository">
+    ```typescript user.repository.ts
+    import { AppDataSource } from "./app-data-source"
+    import { User } from "./entity/User"
+
+    export const UserRepository = AppDataSource.getRepository(User).extend({
+        findByName(firstName: string, lastName: string) {
+            return this.createQueryBuilder("user")
+                .where("user.firstName = :firstName", { firstName })
+                .andWhere("user.lastName = :lastName", { lastName })
+                .getMany()
+        },
+
+        async findActiveAdmins() {
+            return this.find({
+                where: { isActive: true, role: "admin" },
+                order: { createdAt: "DESC" },
+            })
+        },
+    })
+    ```
+  </Step>
+
+  <Step title="Use the custom repository">
+    Import the exported constant wherever you need it:
+
+    ```typescript user.controller.ts
+    import { UserRepository } from "./user.repository"
+
+    export class UserController {
+        async getUsersByName(firstName: string, lastName: string) {
+            return UserRepository.findByName(firstName, lastName)
+        }
+
+        async getActiveAdmins() {
+            return UserRepository.findActiveAdmins()
+        }
+    }
+    ```
+  </Step>
+</Steps>
+
+<Tip>
+  Assign the repository to a module-level exported constant. This avoids creating a new repository instance on every request and ensures the custom methods are always available wherever you import the constant.
+</Tip>
+
+## Adding multiple methods
+
+You can add as many methods as you like to the object passed to `.extend()`. Each method has access to the full `Repository` API via `this`:
+
+```typescript post.repository.ts
+import { AppDataSource } from "./app-data-source"
+import { Post } from "./entity/Post"
+import { Between } from "typeorm"
+
+export const PostRepository = AppDataSource.getRepository(Post).extend({
+    findPublished() {
+        return this.findBy({ isPublished: true })
+    },
+
+    findByDateRange(from: Date, to: Date) {
+        return this.findBy({ createdAt: Between(from, to) })
+    },
+
+    async findWithCommentCount() {
+        return this.createQueryBuilder("post")
+            .loadRelationCountAndMap("post.commentCount", "post.comments")
+            .getMany()
+    },
+
+    async archiveOlderThan(date: Date) {
+        await this.createQueryBuilder()
+            .update(Post)
+            .set({ isArchived: true })
+            .where("createdAt < :date", { date })
+            .execute()
+    },
+})
+```
+
+## Using custom repositories in transactions
+
+Global repository constants (obtained from `DataSource.getRepository()`) cannot be used directly inside a transaction because they are bound to the data source's default query runner, not the transaction's query runner.
+
+Inside a transaction, call `manager.withRepository()` to get a transaction-scoped version of your custom repository:
+
+```typescript
+import { AppDataSource } from "./app-data-source"
+import { UserRepository } from "./user.repository"
+
+await AppDataSource.manager.transaction(async (manager) => {
+    // Get a transaction-scoped version of the custom repository
+    const userRepository = manager.withRepository(UserRepository)
+
+    const user = userRepository.create({
+        firstName: "Timber",
+        lastName: "Saw",
+    })
+    await userRepository.save(user)
+
+    // Custom methods are available on the transaction-scoped instance
+    const found = await userRepository.findByName("Timber", "Saw")
+    console.log(found)
+})
+```
+
+<Warning>
+  Inside a transaction, you **must** use the manager provided by the transaction callback. Using the global `UserRepository` constant directly bypasses the transaction and may cause data inconsistencies.
+</Warning>
+
+## Type inference
+
+TypeScript infers the return type of `.extend()` automatically, so your custom methods are fully type-safe without any manual type annotations on the repository variable:
+
+```typescript
+// TypeScript knows about findByName without any extra type declarations
+const users = await UserRepository.findByName("Timber", "Saw")
+//    ^? User[]
+```
+
+## Next steps
+
+<Columns cols={2}>
+  <Card title="Repository API" icon="book" href="/working-with-entity-manager/repository-api">
+    Full reference for all built-in Repository methods available inside .extend().
+  </Card>
+  <Card title="Query builder" icon="terminal" href="/query-builder/select-query-builder">
+    Build complex queries using createQueryBuilder inside your custom methods.
+  </Card>
+</Columns>

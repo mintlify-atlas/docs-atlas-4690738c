@@ -1,0 +1,136 @@
+---
+title: "Relational query builder"
+description: "Use TypeORM's RelationQueryBuilder to load, set, add, and remove relations without loading full entity graphs."
+---
+
+## What is RelationQueryBuilder?
+
+`RelationQueryBuilder` is a specialized `QueryBuilder` type for working with entity relations directly at the database level. It lets you:
+
+- Load related entities for an already-fetched entity
+- Bind and unbind related entities without loading either side
+- Work with entity ids instead of entity instances
+
+This is especially important for relations with large collections. Loading a post with ten thousand categories just to add one more is impractical — `RelationQueryBuilder` avoids that entirely.
+
+## Adding to a relation
+
+Use `.add()` to add a related entity to a `many-to-many` or `one-to-many` relation.
+
+```typescript
+// Using entity instances
+await dataSource
+    .createQueryBuilder()
+    .relation(Post, "categories")
+    .of(post)
+    .add(category)
+
+// Using ids directly
+await dataSource
+    .createQueryBuilder()
+    .relation(Post, "categories")
+    .of(1)   // post id
+    .add(3)  // category id
+```
+
+For composite primary keys, pass an id map:
+
+```typescript
+await dataSource
+    .createQueryBuilder()
+    .relation(Post, "categories")
+    .of({ firstPostId: 1, secondPostId: 3 })
+    .add({ firstCategoryId: 2, secondCategoryId: 4 })
+```
+
+<Tip>
+Using ids is preferred in high-throughput scenarios. You avoid loading entity instances entirely, keeping the operation to a minimal number of SQL statements.
+</Tip>
+
+## Removing from a relation
+
+Use `.remove()` to detach a related entity from a `many-to-many` or `one-to-many` relation:
+
+```typescript
+await dataSource
+    .createQueryBuilder()
+    .relation(Post, "categories")
+    .of(post)     // or just post id
+    .remove(category)  // or just category id
+```
+
+## Setting a relation
+
+For `one-to-one` and `many-to-one` relations (which hold a single related entity), use `.set()` instead of `.add()` / `.remove()`:
+
+```typescript
+// Set the relation
+await dataSource
+    .createQueryBuilder()
+    .relation(Post, "author")
+    .of(post)
+    .set(user)
+
+// Unset the relation (set to null)
+await dataSource
+    .createQueryBuilder()
+    .relation(Post, "author")
+    .of(post)
+    .set(null)
+```
+
+<Note>
+`.add()` and `.remove()` work for `many-to-many` and `one-to-many` relations.
+`.set()` works for `one-to-one` and `many-to-one` relations.
+</Note>
+
+## Loading relations
+
+Load related entities for an already-fetched entity instance without re-querying the main entity:
+
+```typescript
+const post = await dataSource.manager.findOneBy(Post, { id: 1 })
+
+// Load a many-to-many relation
+post.categories = await dataSource
+    .createQueryBuilder()
+    .relation(Post, "categories")
+    .of(post)
+    .loadMany()
+
+// Load a many-to-one / one-to-one relation
+post.author = await dataSource
+    .createQueryBuilder()
+    .relation(Post, "user")
+    .of(post)
+    .loadOne()
+```
+
+Use `loadMany()` for relations that return an array (`@OneToMany`, `@ManyToMany`) and `loadOne()` for relations that return a single entity (`@ManyToOne`, `@OneToOne`).
+
+## Comparison with save()
+
+Consider adding a category to a post. The naive approach loads the entire collection:
+
+```typescript
+// Naive — loads all categories first
+const post = await postRepository.findOne({
+    where: { id: 1 },
+    relations: { categories: true },
+})
+post.categories.push(newCategory)
+await postRepository.save(post)
+```
+
+With `RelationQueryBuilder`, no entities need to be loaded at all:
+
+```typescript
+// Efficient — single INSERT into the join table
+await dataSource
+    .createQueryBuilder()
+    .relation(Post, "categories")
+    .of(1)  // post id
+    .add(newCategory.id)
+```
+
+The difference is dramatic when the existing collection is large.

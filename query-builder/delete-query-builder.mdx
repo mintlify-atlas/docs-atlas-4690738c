@@ -1,0 +1,193 @@
+---
+title: "Delete query builder"
+description: "Build and execute DELETE queries with TypeORM's DeleteQueryBuilder. Covers hard delete, soft delete, restore, bulk delete, and RETURNING support."
+---
+
+## Basic delete
+
+Use `DeleteQueryBuilder` to build `DELETE` statements. This is the most efficient way to remove entities — it executes a single SQL statement without loading entities first.
+
+```typescript
+await dataSource
+    .createQueryBuilder()
+    .delete()
+    .from(User)
+    .where("id = :id", { id: 1 })
+    .execute()
+```
+
+This produces:
+
+```sql
+DELETE FROM users WHERE id = 1
+```
+
+The `execute()` method returns a `DeleteResult` containing the number of affected rows.
+
+## Conditional delete
+
+Use `where`, `andWhere`, and `orWhere` to target specific rows. The same parameter rules as `SelectQueryBuilder` apply — always use named parameters.
+
+```typescript
+await dataSource
+    .createQueryBuilder()
+    .delete()
+    .from(Post)
+    .where("status = :status", { status: "draft" })
+    .andWhere("createdAt < :cutoff", { cutoff: new Date("2023-01-01") })
+    .execute()
+```
+
+## Bulk delete
+
+Use an `IN` condition with the spread syntax to delete multiple rows by ID in a single query:
+
+```typescript
+const idsToDelete = [1, 2, 3, 4, 5]
+
+await dataSource
+    .createQueryBuilder()
+    .delete()
+    .from(User)
+    .where("id IN (:...ids)", { ids: idsToDelete })
+    .execute()
+// → DELETE FROM users WHERE id IN (1, 2, 3, 4, 5)
+```
+
+## Soft delete
+
+A soft delete sets `@DeleteDateColumn` to the current timestamp rather than removing the row. The entity must have a column decorated with `@DeleteDateColumn`.
+
+```typescript
+@Entity()
+export class User {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    @Column()
+    name: string
+
+    @DeleteDateColumn()
+    deletedAt?: Date
+}
+```
+
+Perform a soft delete using `softDelete()`:
+
+```typescript
+await dataSource
+    .getRepository(User)
+    .createQueryBuilder()
+    .softDelete()
+    .where("id = :id", { id: 1 })
+    .execute()
+```
+
+Rows with a non-null `deletedAt` are automatically excluded from all `SelectQueryBuilder` and `Repository.find*` results unless you explicitly call `.withDeleted()`.
+
+## Restore soft-deleted rows
+
+Use `restore()` to clear the `deletedAt` column and make the row visible again:
+
+```typescript
+await dataSource
+    .getRepository(User)
+    .createQueryBuilder()
+    .restore()
+    .where("id = :id", { id: 1 })
+    .execute()
+```
+
+## Delete with RETURNING / OUTPUT
+
+Use `.returning()` to receive the deleted rows' column values from the database. The alias `.output()` is equivalent for SQL Server readability.
+
+<Tabs>
+  <Tab title="PostgreSQL / CockroachDB">
+    ```typescript
+    const result = await dataSource
+        .createQueryBuilder()
+        .delete()
+        .from(User)
+        .where("id = :id", { id: 1 })
+        .returning(["id", "firstName"])
+        .execute()
+
+    console.log(result.raw)
+    // → [{ id: 1, firstName: 'Timber' }]
+    ```
+  </Tab>
+  <Tab title="SQL Server (OUTPUT)">
+    ```typescript
+    const result = await dataSource
+        .createQueryBuilder()
+        .delete()
+        .from(User)
+        .where("id = :id", { id: 1 })
+        .output(["id", "firstName"])
+        .execute()
+    // Produces: DELETE FROM users OUTPUT DELETED.id, DELETED.firstName WHERE id = 1
+    ```
+  </Tab>
+  <Tab title="Google Spanner">
+    ```typescript
+    const result = await dataSource
+        .createQueryBuilder()
+        .delete()
+        .from(User)
+        .where("id = :id", { id: 1 })
+        .returning(["id"])
+        .execute()
+    // Produces: DELETE FROM users WHERE id = 1 THEN RETURN id
+    ```
+  </Tab>
+</Tabs>
+
+<Note>
+`RETURNING` is supported by PostgreSQL, CockroachDB, and Google Spanner. `OUTPUT` is supported by SQL Server. MySQL, SQLite, and Oracle do not support this clause — calling `.returning()` on them throws `ReturningStatementNotSupportedError`.
+</Note>
+
+## Hard delete vs. soft delete
+
+<AccordionGroup>
+  <Accordion title="Hard delete">
+    The row is permanently removed from the table. There is no way to recover it through TypeORM.
+
+    ```typescript
+    await dataSource
+        .createQueryBuilder()
+        .delete()
+        .from(User)
+        .where("id = :id", { id: 1 })
+        .execute()
+    ```
+  </Accordion>
+  <Accordion title="Soft delete (recommended for auditable data)">
+    The row remains in the table with `deletedAt` set. It is hidden from normal queries but can be restored.
+
+    ```typescript
+    // Soft-delete
+    await dataSource
+        .getRepository(User)
+        .createQueryBuilder()
+        .softDelete()
+        .where("id = :id", { id: 1 })
+        .execute()
+
+    // Restore
+    await dataSource
+        .getRepository(User)
+        .createQueryBuilder()
+        .restore()
+        .where("id = :id", { id: 1 })
+        .execute()
+
+    // Query including soft-deleted rows
+    const all = await dataSource
+        .getRepository(User)
+        .createQueryBuilder("user")
+        .withDeleted()
+        .getMany()
+    ```
+  </Accordion>
+</AccordionGroup>

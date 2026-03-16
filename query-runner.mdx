@@ -1,0 +1,292 @@
+---
+title: Query runner
+description: Use QueryRunner to control a single database connection, manage transactions manually, and perform schema operations like createTable, addColumn, and dropIndex.
+---
+
+A `QueryRunner` holds a single dedicated database connection taken from the connection pool. It is the lowest-level API in TypeORM and gives you full control over connection lifecycle, transaction state, and schema DDL operations.
+
+## Getting a QueryRunner
+
+Create a `QueryRunner` from a `DataSource`:
+
+```typescript
+const queryRunner = dataSource.createQueryRunner()
+```
+
+The connection is acquired from the pool lazily — when you issue the first query — or eagerly by calling `connect()`:
+
+```typescript
+const queryRunner = dataSource.createQueryRunner()
+await queryRunner.connect()  // explicitly acquire from pool
+```
+
+## Running queries
+
+```typescript
+const users = await queryRunner.query("SELECT * FROM users WHERE active = $1", [true])
+```
+
+You can also use the tagged template `sql` helper, which automatically parameterizes template expressions:
+
+```typescript
+const id = 42
+const user = await queryRunner.sql`SELECT * FROM users WHERE id = ${id}`
+```
+
+## The `manager` property
+
+`QueryRunner` exposes an `EntityManager` scoped to its connection. Use it to run repository-style operations on the same connection:
+
+```typescript
+let queryRunner: QueryRunner
+try {
+    queryRunner = dataSource.createQueryRunner()
+    await queryRunner.manager.update(
+        Employee,
+        { level: "junior" },
+        { bonus: 0.2 },
+    )
+    await queryRunner.manager.update(
+        Employee,
+        { level: "senior" },
+        { bonus: 0.1 },
+    )
+} catch (error) {
+    console.error(error)
+} finally {
+    await queryRunner.release()
+}
+```
+
+## Releasing the connection
+
+<Warning>
+Always release a manually created `QueryRunner` when you are done with it. Not releasing returns the connection to the pool and prevents connection leaks.
+</Warning>
+
+```typescript
+await queryRunner.release()
+```
+
+After `release()` is called, calling any method on the query runner throws an error.
+
+## Explicit resource management
+
+`QueryRunner` implements `AsyncDisposable`, so you can use the `await using` syntax (TypeScript 5.2+) to release automatically when the containing scope exits:
+
+```typescript
+async function updateSalaries() {
+    await using queryRunner = dataSource.createQueryRunner()
+    await queryRunner.manager.update(Employee, { level: "junior" }, { bonus: 0.2 })
+    await queryRunner.manager.update(Employee, { level: "senior" }, { bonus: 0.1 })
+    // queryRunner.release() is called automatically here
+}
+
+try {
+    await updateSalaries()
+} catch (error) {
+    console.error(error)
+}
+```
+
+## Transactions
+
+```typescript
+const queryRunner = dataSource.createQueryRunner()
+await queryRunner.connect()
+await queryRunner.startTransaction()  // optional: pass an isolation level
+
+try {
+    await queryRunner.manager.save(user)
+    await queryRunner.manager.save(order)
+
+    await queryRunner.commitTransaction()
+} catch (err) {
+    await queryRunner.rollbackTransaction()
+} finally {
+    await queryRunner.release()
+}
+```
+
+| Method | Description |
+|---|---|
+| `startTransaction(isolationLevel?)` | Opens a transaction. Accepts `READ UNCOMMITTED`, `READ COMMITTED`, `REPEATABLE READ`, or `SERIALIZABLE`. |
+| `commitTransaction()` | Commits the active transaction. Throws if no transaction is active. |
+| `rollbackTransaction()` | Rolls back the active transaction. Throws if no transaction is active. |
+| `isTransactionActive` | `true` while a transaction is open. |
+
+See [Transactions](/advanced-topics/transactions) for higher-level transaction helpers.
+
+## Schema operations
+
+QueryRunner provides a full DDL API for use in migrations and dynamic schema management.
+
+### Tables
+
+| Method | Signature | Description |
+|---|---|---|
+| `createTable` | `(table, ifNotExists?, createForeignKeys?, createIndices?)` | Creates a new table. |
+| `dropTable` | `(table, ifExists?, dropForeignKeys?, dropIndices?)` | Drops a table. |
+| `renameTable` | `(oldTableOrName, newTableName)` | Renames a table. |
+| `getTable` | `(tablePath)` | Returns table metadata. |
+| `getTables` | `(tablePaths?)` | Returns metadata for multiple tables. |
+| `hasTable` | `(table)` | Returns `true` if the table exists. |
+| `clearTable` | `(tableName, options?)` | Truncates a table. Cannot be rolled back. |
+| `clearDatabase` | `(database?)` | Drops all tables. **Destructive.** |
+
+```typescript
+import { Table } from "typeorm"
+
+await queryRunner.createTable(
+    new Table({
+        name: "users",
+        columns: [
+            { name: "id", type: "int", isPrimary: true, isGenerated: true, generationStrategy: "increment" },
+            { name: "name", type: "varchar", length: "255" },
+            { name: "email", type: "varchar", length: "255", isUnique: true },
+        ],
+    }),
+    true, // ifNotExists
+)
+```
+
+### Columns
+
+| Method | Signature | Description |
+|---|---|---|
+| `addColumn` | `(table, column)` | Adds a column to a table. |
+| `addColumns` | `(table, columns)` | Adds multiple columns. |
+| `renameColumn` | `(table, oldColumnOrName, newColumnOrName)` | Renames a column. |
+| `changeColumn` | `(table, oldColumn, newColumn)` | Modifies a column definition. |
+| `changeColumns` | `(table, changedColumns)` | Modifies multiple columns. |
+| `dropColumn` | `(table, column, ifExists?)` | Drops a column. |
+| `dropColumns` | `(table, columns, ifExists?)` | Drops multiple columns. |
+| `hasColumn` | `(table, columnName)` | Returns `true` if the column exists. |
+
+```typescript
+import { TableColumn } from "typeorm"
+
+await queryRunner.addColumn(
+    "users",
+    new TableColumn({ name: "age", type: "int", isNullable: true }),
+)
+```
+
+### Primary keys
+
+| Method | Signature | Description |
+|---|---|---|
+| `createPrimaryKey` | `(table, columnNames, constraintName?)` | Creates a primary key. |
+| `updatePrimaryKeys` | `(table, columns)` | Updates a composite primary key. |
+| `dropPrimaryKey` | `(table, constraintName?, ifExists?)` | Drops the primary key. |
+
+### Unique constraints
+
+| Method | Signature | Description |
+|---|---|---|
+| `createUniqueConstraint` | `(table, uniqueConstraint)` | Adds a unique constraint. |
+| `createUniqueConstraints` | `(table, uniqueConstraints)` | Adds multiple unique constraints. |
+| `dropUniqueConstraint` | `(table, uniqueOrName, ifExists?)` | Drops a unique constraint. |
+| `dropUniqueConstraints` | `(table, uniqueConstraints, ifExists?)` | Drops multiple unique constraints. |
+
+### Check constraints
+
+| Method | Signature | Description |
+|---|---|---|
+| `createCheckConstraint` | `(table, checkConstraint)` | Adds a check constraint. |
+| `createCheckConstraints` | `(table, checkConstraints)` | Adds multiple check constraints. |
+| `dropCheckConstraint` | `(table, checkOrName, ifExists?)` | Drops a check constraint. |
+| `dropCheckConstraints` | `(table, checkConstraints, ifExists?)` | Drops multiple check constraints. |
+
+### Exclusion constraints (PostgreSQL)
+
+| Method | Signature | Description |
+|---|---|---|
+| `createExclusionConstraint` | `(table, exclusionConstraint)` | Adds an exclusion constraint. |
+| `createExclusionConstraints` | `(table, exclusionConstraints)` | Adds multiple exclusion constraints. |
+| `dropExclusionConstraint` | `(table, exclusionOrName, ifExists?)` | Drops an exclusion constraint. |
+| `dropExclusionConstraints` | `(table, exclusionConstraints, ifExists?)` | Drops multiple exclusion constraints. |
+
+### Foreign keys
+
+| Method | Signature | Description |
+|---|---|---|
+| `createForeignKey` | `(table, foreignKey)` | Adds a foreign key. |
+| `createForeignKeys` | `(table, foreignKeys)` | Adds multiple foreign keys. |
+| `dropForeignKey` | `(table, foreignKeyOrName, ifExists?)` | Drops a foreign key. |
+| `dropForeignKeys` | `(table, foreignKeys, ifExists?)` | Drops multiple foreign keys. |
+
+### Indices
+
+| Method | Signature | Description |
+|---|---|---|
+| `createIndex` | `(table, index)` | Creates an index. |
+| `createIndices` | `(table, indices)` | Creates multiple indices. |
+| `dropIndex` | `(table, index, ifExists?)` | Drops an index. |
+| `dropIndices` | `(table, indices, ifExists?)` | Drops multiple indices. |
+
+```typescript
+import { TableIndex } from "typeorm"
+
+await queryRunner.createIndex(
+    "users",
+    new TableIndex({
+        name: "IDX_USERS_EMAIL",
+        columnNames: ["email"],
+        isUnique: true,
+    }),
+)
+```
+
+### Views
+
+| Method | Signature | Description |
+|---|---|---|
+| `createView` | `(view, syncWithMetadata?, oldView?)` | Creates a view. |
+| `dropView` | `(view, ifExists?)` | Drops a view. |
+| `getView` | `(viewPath)` | Returns view metadata. |
+| `getViews` | `(viewPaths?)` | Returns metadata for multiple views. |
+
+### Databases and schemas
+
+| Method | Description |
+|---|---|
+| `createDatabase(database, ifNotExists?)` | Creates a database. |
+| `dropDatabase(database, ifExists?)` | Drops a database. |
+| `createSchema(schemaPath, ifNotExists?)` | Creates a schema (PostgreSQL / SQL Server). |
+| `dropSchema(schemaPath, ifExists?, isCascade?)` | Drops a schema. |
+| `getDatabases()` | Lists all databases. |
+| `getSchemas(database?)` | Lists all schemas. |
+| `hasDatabase(database)` | Returns `true` if the database exists. |
+| `hasSchema(schema)` | Returns `true` if the schema exists. |
+| `getCurrentDatabase()` | Returns the current database name. |
+| `getCurrentSchema()` | Returns the current schema name. |
+
+## SQL memory mode
+
+You can put the query runner into a "dry-run" mode where queries are recorded but not executed:
+
+```typescript
+queryRunner.enableSqlMemory()
+
+// run your DDL operations
+await queryRunner.createTable(myTable)
+await queryRunner.addColumn("users", newColumn)
+
+// retrieve the SQL that would have run
+const sqlInMemory = queryRunner.getMemorySql()
+console.log(sqlInMemory.upQueries)
+console.log(sqlInMemory.downQueries)
+
+queryRunner.disableSqlMemory()
+```
+
+## QueryRunner properties
+
+| Property | Type | Description |
+|---|---|---|
+| `connection` | `DataSource` | The DataSource this runner belongs to. |
+| `manager` | `EntityManager` | EntityManager scoped to this connection. |
+| `isReleased` | `boolean` | `true` after `release()` has been called. |
+| `isTransactionActive` | `boolean` | `true` while a transaction is open. |
+| `data` | `ObjectLiteral` | Temporary user data for sharing with subscribers. |

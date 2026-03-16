@@ -1,0 +1,195 @@
+---
+title: "Oracle"
+description: "Connect TypeORM to Oracle Database using the oracledb driver. Covers thin and thick mode, connection string formats, schema configuration, and supported column types."
+---
+
+TypeORM supports Oracle Database through the `oracledb` Node.js driver.
+
+## Installation
+
+<CodeGroup>
+
+```bash npm
+npm install oracledb
+```
+
+```bash yarn
+yarn add oracledb
+```
+
+```bash pnpm
+pnpm add oracledb
+```
+
+</CodeGroup>
+
+<Note>
+  `oracledb` defaults to **thin mode**, which is a pure JavaScript implementation and does not require Oracle Client libraries. To use **thick mode** (which supports additional features like advanced queuing and SODA), follow the [installation guide](https://node-oracledb.readthedocs.io/en/latest/user_guide/installation.html) in the oracledb documentation.
+</Note>
+
+## DataSource configuration
+
+<Tabs>
+  <Tab title="Basic connection">
+
+```typescript app-data-source.ts
+import { DataSource } from "typeorm"
+
+export const AppDataSource = new DataSource({
+    type: "oracle",
+    host: "localhost",
+    port: 1521,
+    username: "myuser",
+    password: "mypassword",
+    database: "mydb",
+    synchronize: false,
+    logging: false,
+    entities: ["src/entities/**/*.ts"],
+    migrations: ["src/migrations/**/*.ts"],
+})
+```
+
+  </Tab>
+  <Tab title="SID">
+
+```typescript app-data-source.ts
+import { DataSource } from "typeorm"
+
+export const AppDataSource = new DataSource({
+    type: "oracle",
+    host: "db.example.com",
+    port: 1521,
+    username: "myuser",
+    password: "mypassword",
+    sid: "ORCL",
+    synchronize: false,
+    entities: ["src/entities/**/*.ts"],
+})
+```
+
+  </Tab>
+  <Tab title="Service name">
+
+```typescript app-data-source.ts
+import { DataSource } from "typeorm"
+
+export const AppDataSource = new DataSource({
+    type: "oracle",
+    host: "db.example.com",
+    port: 1521,
+    username: "myuser",
+    password: "mypassword",
+    serviceName: "sales.us.example.com",
+    synchronize: false,
+    entities: ["src/entities/**/*.ts"],
+})
+```
+
+  </Tab>
+  <Tab title="Connection URL">
+
+```typescript app-data-source.ts
+import { DataSource } from "typeorm"
+
+export const AppDataSource = new DataSource({
+    type: "oracle",
+    // Easy Connect Plus format
+    connectString: "db.example.com:1521/sales.us.example.com",
+    username: "myuser",
+    password: "mypassword",
+    synchronize: false,
+    entities: ["src/entities/**/*.ts"],
+})
+```
+
+  </Tab>
+</Tabs>
+
+## Connection options
+
+<ParamField path="type" type="string" required>
+  Must be `"oracle"`.
+</ParamField>
+
+<ParamField path="host" type="string">
+  Hostname or IP address of the Oracle Database server.
+</ParamField>
+
+<ParamField path="port" type="number" default="1521">
+  Oracle listener port.
+</ParamField>
+
+<ParamField path="username" type="string">
+  Oracle database username.
+</ParamField>
+
+<ParamField path="password" type="string">
+  Oracle database password.
+</ParamField>
+
+<ParamField path="database" type="string">
+  Database or service name. Acts as a shorthand when neither `sid` nor `serviceName` is specified.
+</ParamField>
+
+<ParamField path="sid" type="string">
+  Oracle System Identifier (SID) for the specific database instance. For example, `"ORCL"` or `"XE"`.
+</ParamField>
+
+<ParamField path="serviceName" type="string">
+  Oracle service name. For example, `"sales.us.example.com"`. Preferred over `sid` for modern Oracle deployments.
+</ParamField>
+
+## Column types
+
+`char`, `nchar`, `nvarchar2`, `varchar2`, `long`, `raw`, `long raw`, `number`, `numeric`, `float`, `dec`, `decimal`, `integer`, `int`, `smallint`, `real`, `double precision`, `date`, `timestamp`, `timestamp with time zone`, `timestamp with local time zone`, `interval year to month`, `interval day to second`, `bfile`, `blob`, `clob`, `nclob`, `rowid`, `urowid`
+
+## Schema configuration
+
+In Oracle, objects are always owned by a user (schema). When you connect as a different user than the schema owner, qualify entity names with the schema:
+
+```typescript
+@Entity({ name: "EMPLOYEES", schema: "HR" })
+export class Employee {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    @Column({ name: "FIRST_NAME", type: "varchar2", length: 50 })
+    firstName: string
+
+    @Column({ name: "SALARY", type: "number", precision: 10, scale: 2 })
+    salary: number
+}
+```
+
+<Tip>
+  Oracle column names are case-insensitive by default and stored as uppercase unless quoted. TypeORM quotes column names when they are defined in camelCase, which can cause issues. Prefer explicit `name` options on `@Column` using uppercase names to match Oracle's conventions.
+</Tip>
+
+## Large object columns
+
+Use `clob` and `blob` for large text and binary data:
+
+```typescript
+@Entity()
+export class Document {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    @Column({ type: "clob", nullable: true })
+    body: string
+
+    @Column({ type: "blob", nullable: true })
+    attachment: Buffer
+}
+```
+
+## Limitations and notes
+
+<Warning>
+  Oracle thin mode (the default) does not support all oracledb features. Advanced queuing, SODA, and some connection pool features require thick mode, which needs Oracle Client libraries installed on the host.
+</Warning>
+
+- Oracle does not support `RETURNING` for batch inserts. Each inserted row requires a round-trip when using `returning`.
+- The `synchronize: true` option is not recommended for Oracle in production. Use migrations instead.
+- Oracle identifiers have a maximum length of 30 characters (128 in Oracle 12.2+). Long entity and column names may be silently truncated in older Oracle versions.
+- TypeORM uses `number` as the storage type for integer columns in Oracle because Oracle does not have a native integer type.

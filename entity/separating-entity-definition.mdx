@@ -1,0 +1,352 @@
+---
+title: "Separating entity definition"
+description: "Define entities and their columns in separate schema files using EntitySchema — useful for JavaScript projects or when you prefer to keep model and metadata separate."
+---
+
+## What is EntitySchema?
+
+`EntitySchema` lets you define an entity's table name, columns, relations, indices, and checks in a plain JavaScript/TypeScript object — without decorators. This is the primary approach for JavaScript projects and is also useful when you prefer to separate domain models from persistence metadata.
+
+## Basic definition
+
+```typescript category.schema.ts
+import { EntitySchema } from "typeorm"
+
+export const CategoryEntity = new EntitySchema({
+    name: "category",
+    columns: {
+        id: {
+            type: Number,
+            primary: true,
+            generated: true,
+        },
+        name: {
+            type: String,
+        },
+    },
+})
+```
+
+## Type-safe schemas
+
+Define an interface for your entity and pass it as the generic parameter to get full type checking on your schema definition:
+
+```typescript category.schema.ts
+import { EntitySchema } from "typeorm"
+
+export interface Category {
+    id: number
+    name: string
+}
+
+export const CategoryEntity = new EntitySchema<Category>({
+    name: "category",
+    columns: {
+        id: {
+            type: Number,
+            primary: true,
+            generated: true,
+        },
+        name: {
+            type: String,
+        },
+    },
+})
+```
+
+## Defining relations
+
+Add a `relations` block to the schema to define associations between entities:
+
+```typescript post.schema.ts
+import { EntitySchema } from "typeorm"
+
+export const PostEntity = new EntitySchema({
+    name: "post",
+    columns: {
+        id: {
+            type: Number,
+            primary: true,
+            generated: true,
+        },
+        title: {
+            type: String,
+        },
+        text: {
+            type: String,
+        },
+    },
+    relations: {
+        categories: {
+            type: "many-to-many",
+            target: "category", // matches the name in CategoryEntity
+        },
+    },
+})
+```
+
+## Complex schemas
+
+Schemas support the full range of TypeORM features — foreign keys, indices, unique constraints, and check constraints:
+
+```typescript person.schema.ts
+import { EntitySchema } from "typeorm"
+
+export const PersonSchema = new EntitySchema({
+    name: "person",
+    columns: {
+        id: {
+            primary: true,
+            type: "int",
+            generated: "increment",
+        },
+        firstName: {
+            type: String,
+            length: 30,
+        },
+        lastName: {
+            type: String,
+            length: 50,
+            nullable: false,
+        },
+        age: {
+            type: Number,
+            nullable: false,
+        },
+        countryCode: {
+            type: String,
+            length: 2,
+        },
+        cityId: {
+            type: Number,
+        },
+    },
+    checks: [
+        { expression: `"firstName" <> 'John' AND "lastName" <> 'Doe'` },
+        { expression: `"age" > 18` },
+    ],
+    indices: [
+        {
+            name: "IDX_TEST",
+            unique: true,
+            columns: ["firstName", "lastName"],
+        },
+    ],
+    uniques: [
+        {
+            name: "UNIQUE_TEST",
+            columns: ["firstName", "lastName"],
+        },
+    ],
+    foreignKeys: [
+        {
+            target: "cities",
+            columnNames: ["cityId", "countryCode"],
+            referencedColumnNames: ["id", "countryCode"],
+        },
+    ],
+})
+```
+
+## Extending schemas
+
+The decorator approach lets you extend a base abstract class. With `EntitySchema`, use the spread operator instead to compose shared column definitions:
+
+```typescript base-columns.ts
+import { EntitySchemaColumnOptions } from "typeorm"
+
+export const BaseColumnSchemaPart = {
+    id: {
+        type: Number,
+        primary: true,
+        generated: true,
+    } as EntitySchemaColumnOptions,
+    createdAt: {
+        name: "created_at",
+        type: "timestamp with time zone",
+        createDate: true,
+    } as EntitySchemaColumnOptions,
+    updatedAt: {
+        name: "updated_at",
+        type: "timestamp with time zone",
+        updateDate: true,
+    } as EntitySchemaColumnOptions,
+}
+```
+
+Spread `BaseColumnSchemaPart` into any schema that needs those columns:
+
+```typescript category.schema.ts
+import { EntitySchema } from "typeorm"
+import { BaseColumnSchemaPart } from "./base-columns"
+
+export interface Category {
+    id: number
+    name: string
+    createdAt: Date
+    updatedAt: Date
+}
+
+export const CategoryEntity = new EntitySchema<Category>({
+    name: "category",
+    columns: {
+        ...BaseColumnSchemaPart,
+        name: {
+            type: String,
+        },
+    },
+})
+```
+
+## Embedded entities
+
+Use the `embeddeds` block to include embedded column groups in schema-defined entities:
+
+```typescript user.schema.ts
+import { EntitySchema } from "typeorm"
+
+export interface Name {
+    first: string
+    last: string
+}
+
+export const NameEntitySchema = new EntitySchema<Name>({
+    name: "name",
+    columns: {
+        first: { type: "varchar" },
+        last: { type: "varchar" },
+    },
+})
+
+export interface User {
+    id: string
+    name: Name
+    isActive: boolean
+}
+
+export const UserEntitySchema = new EntitySchema<User>({
+    name: "user",
+    columns: {
+        id: {
+            primary: true,
+            generated: "uuid",
+            type: "uuid",
+        },
+        isActive: {
+            type: "boolean",
+        },
+    },
+    embeddeds: {
+        name: {
+            schema: NameEntitySchema,
+            prefix: "name_",
+        },
+    },
+})
+```
+
+## Single table inheritance
+
+To use STI with `EntitySchema`, set the `inheritance` option on the parent schema and `type: "entity-child"` on each child schema:
+
+<Steps>
+  <Step title="Define the entity classes">
+    ```typescript entity.ts
+    export abstract class Base {
+        id!: number
+        type!: string
+        createdAt!: Date
+        updatedAt!: Date
+    }
+
+    export class A extends Base {
+        constructor(public a: boolean) {
+            super()
+        }
+    }
+
+    export class B extends Base {
+        constructor(public b: number) {
+            super()
+        }
+    }
+    ```
+  </Step>
+
+  <Step title="Define the schemas">
+    ```typescript schema.ts
+    import { EntitySchema } from "typeorm"
+    import { Base, A, B } from "./entity"
+
+    const BaseSchema = new EntitySchema<Base>({
+        target: Base,
+        name: "Base",
+        columns: {
+            id: {
+                type: Number,
+                primary: true,
+                generated: "increment",
+            },
+            type: {
+                type: String,
+            },
+            createdAt: {
+                type: Date,
+                createDate: true,
+            },
+            updatedAt: {
+                type: Date,
+                updateDate: true,
+            },
+        },
+        inheritance: {
+            pattern: "STI",
+            column: "type",
+        },
+    })
+
+    const ASchema = new EntitySchema<A>({
+        target: A,
+        name: "A",
+        type: "entity-child",
+        discriminatorValue: "my-custom-discriminator-value-for-A",
+        columns: {
+            ...BaseSchema.options.columns,
+            a: { type: Boolean },
+        },
+    })
+
+    const BSchema = new EntitySchema<B>({
+        target: B,
+        name: "B",
+        type: "entity-child",
+        discriminatorValue: undefined, // defaults to the class name "B"
+        columns: {
+            ...BaseSchema.options.columns,
+            b: { type: Number },
+        },
+    })
+    ```
+  </Step>
+</Steps>
+
+<Note>
+  When `discriminatorValue` is `undefined`, TypeORM uses the class name as the discriminator value.
+</Note>
+
+## Querying and inserting with schemas
+
+Use `EntitySchema` instances anywhere you would use an entity class:
+
+```typescript
+import { Category, CategoryEntity } from "./category.schema"
+
+// Typed repository
+const repository = dataSource.getRepository<Category>(CategoryEntity)
+
+// Find — result is properly typed as Category
+const category = await repository.findOneBy({ id: 1 })
+
+// Insert
+const newCategory = await repository.save({ name: "new category" })
+```

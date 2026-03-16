@@ -1,0 +1,97 @@
+---
+title: "Faking migrations"
+description: "Mark migrations as applied without executing their SQL, and use the --fake flag for rollbacks."
+---
+
+The `--fake` flag (alias `-f`) marks migrations as executed in the migrations table without actually running their `up` or `down` methods.
+
+## Faking a run
+
+```bash
+npx typeorm-ts-node-commonjs migration:run -d src/data-source.ts --fake
+```
+
+This records all pending migrations as executed without touching the schema.
+
+## Faking a revert
+
+```bash
+npx typeorm-ts-node-commonjs migration:revert -d src/data-source.ts --fake
+```
+
+This removes the most recent migration record from the migrations table without calling its `down` method.
+
+## When to use `--fake`
+
+<AccordionGroup>
+  <Accordion title="Schema was already changed manually">
+    If a DBA applied changes directly to the database outside of TypeORM, the schema is already in the expected state. Use `--fake` to record the migration as applied so TypeORM's history stays consistent with reality.
+  </Accordion>
+  <Accordion title="Migrations were run by another tool">
+    If another tool (a deployment script, another application, or a manual SQL runner) executed migrations, you can use `--fake` to synchronize the TypeORM migrations table with what was actually run.
+  </Accordion>
+  <Accordion title="Initial migration on a pre-existing database">
+    When you introduce TypeORM migrations to an existing database that already has the correct schema, generate a migration that represents the current state, then `--fake` run it to establish a baseline without re-applying changes.
+  </Accordion>
+  <Accordion title="Resetting migration history">
+    If migration records have drifted out of sync with the actual schema (for example after a production incident), use a combination of `--fake` reverts and runs to align the history table with the real database state.
+  </Accordion>
+</AccordionGroup>
+
+<Warning>
+  Use `--fake` with care. It bypasses all SQL execution. If the schema is not actually in the state the migration assumes, subsequent migrations or application code may fail.
+</Warning>
+
+## Transaction modes
+
+The `--transaction` flag controls how migrations are wrapped in database transactions. It applies to both `migration:run` and `migration:revert`.
+
+<Tabs>
+  <Tab title="all (default)">
+    All pending migrations execute inside a single transaction. If any migration fails, the entire batch is rolled back.
+
+    ```bash
+    npx typeorm-ts-node-commonjs migration:run -d src/data-source.ts --transaction all
+    ```
+  </Tab>
+  <Tab title="each">
+    Each migration runs in its own transaction. A failure rolls back only that migration; earlier ones remain committed.
+
+    ```bash
+    npx typeorm-ts-node-commonjs migration:run -d src/data-source.ts --transaction each
+    ```
+  </Tab>
+  <Tab title="none">
+    Migrations run without any transaction wrapping. Useful for DDL statements that cannot run inside a transaction (e.g., `CREATE INDEX CONCURRENTLY` on PostgreSQL).
+
+    ```bash
+    npx typeorm-ts-node-commonjs migration:run -d src/data-source.ts --transaction none
+    ```
+  </Tab>
+</Tabs>
+
+### Per-migration transaction override
+
+When using `"each"` or `"none"` transaction mode, individual migrations can override the behavior by setting the `transaction` property:
+
+```typescript
+import { MigrationInterface, QueryRunner } from "typeorm"
+
+export class AddConcurrentIndex1699000000000 implements MigrationInterface {
+    transaction = false
+
+    async up(queryRunner: QueryRunner): Promise<void> {
+        await queryRunner.query(
+            `CREATE INDEX CONCURRENTLY post_names_idx ON post(name)`,
+        )
+    }
+
+    async down(queryRunner: QueryRunner): Promise<void> {
+        await queryRunner.query(`DROP INDEX CONCURRENTLY post_names_idx`)
+    }
+}
+```
+
+<Note>
+  The `transaction` property on the migration class is only respected in `"each"` or `"none"` mode. In `"all"` mode it has no effect.
+</Note>

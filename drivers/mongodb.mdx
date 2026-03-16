@@ -1,0 +1,388 @@
+---
+title: "MongoDB"
+description: "Connect TypeORM to MongoDB using the mongodb driver. Covers ObjectIdColumn, MongoRepository, MongoEntityManager, subdocuments, and MongoDB-specific query operators."
+---
+
+TypeORM provides basic MongoDB support through the Node.js `mongodb` driver (v7 or later). Most TypeORM functionality is designed for relational databases; this page documents everything that is specific to MongoDB.
+
+<Warning>
+  MongoDB support in TypeORM is limited. Relations, transactions, and many RDBMS-specific features are not supported. For production MongoDB applications with complex data access patterns, consider using the MongoDB driver directly or an ODM like Mongoose.
+</Warning>
+
+## Installation
+
+<CodeGroup>
+
+```bash npm
+npm install mongodb
+```
+
+```bash yarn
+yarn add mongodb
+```
+
+```bash pnpm
+pnpm add mongodb
+```
+
+</CodeGroup>
+
+## DataSource configuration
+
+<Tabs>
+  <Tab title="Basic">
+
+```typescript app-data-source.ts
+import { DataSource } from "typeorm"
+
+export const AppDataSource = new DataSource({
+    type: "mongodb",
+    host: "localhost",
+    port: 27017,
+    database: "mydb",
+    synchronize: false,
+    logging: false,
+    entities: ["src/entities/**/*.ts"],
+})
+```
+
+  </Tab>
+  <Tab title="Connection URL">
+
+```typescript app-data-source.ts
+import { DataSource } from "typeorm"
+
+export const AppDataSource = new DataSource({
+    type: "mongodb",
+    url: "mongodb+srv://myuser:mypassword@cluster0.example.mongodb.net/mydb?retryWrites=true&w=majority",
+    entities: ["src/entities/**/*.ts"],
+})
+```
+
+  </Tab>
+  <Tab title="Replica set">
+
+```typescript app-data-source.ts
+import { DataSource } from "typeorm"
+
+export const AppDataSource = new DataSource({
+    type: "mongodb",
+    host: "primary.example.com",
+    port: 27017,
+    database: "mydb",
+    replicaSet: "rs0",
+    readPreference: "secondaryPreferred",
+    retryWrites: true,
+    entities: ["src/entities/**/*.ts"],
+})
+```
+
+  </Tab>
+  <Tab title="TLS">
+
+```typescript app-data-source.ts
+import { DataSource } from "typeorm"
+
+export const AppDataSource = new DataSource({
+    type: "mongodb",
+    host: "db.example.com",
+    port: 27017,
+    database: "mydb",
+    tls: true,
+    tlsCAFile: "/path/to/ca.pem",
+    tlsCertificateKeyFile: "/path/to/client.pem",
+    tlsCertificateKeyFilePassword: "certpassword",
+    entities: ["src/entities/**/*.ts"],
+})
+```
+
+  </Tab>
+</Tabs>
+
+## Connection options
+
+<ParamField path="type" type="string" required>
+  Must be `"mongodb"`.
+</ParamField>
+
+<ParamField path="host" type="string">
+  MongoDB server hostname.
+</ParamField>
+
+<ParamField path="port" type="number" default="27017">
+  MongoDB server port.
+</ParamField>
+
+<ParamField path="database" type="string">
+  Database name.
+</ParamField>
+
+<ParamField path="url" type="string">
+  Full MongoDB connection URL. Individual options override URL components when both are provided.
+</ParamField>
+
+<ParamField path="username" type="string">
+  MongoDB username.
+</ParamField>
+
+<ParamField path="password" type="string">
+  MongoDB password.
+</ParamField>
+
+<ParamField path="authSource" type="string">
+  Database name associated with the user's credentials. Defaults to the value of `database`.
+</ParamField>
+
+<ParamField path="authMechanism" type="string">
+  Authentication mechanism (e.g. `"SCRAM-SHA-256"`, `"MONGODB-X509"`).
+</ParamField>
+
+<ParamField path="replicaSet" type="string">
+  Replica set name. Set this when connecting to a replica set.
+</ParamField>
+
+<ParamField path="readPreference" type="string">
+  Read preference: `"primary"`, `"primaryPreferred"`, `"secondary"`, `"secondaryPreferred"`, or `"nearest"`.
+</ParamField>
+
+<ParamField path="tls" type="boolean" default="false">
+  Enable TLS/SSL for the connection.
+</ParamField>
+
+<ParamField path="tlsCAFile" type="string">
+  Path to a PEM file containing the root CA certificate chain.
+</ParamField>
+
+<ParamField path="tlsCertificateKeyFile" type="string">
+  Path to a PEM file containing the client certificate and private key.
+</ParamField>
+
+<ParamField path="tlsCertificateKeyFilePassword" type="string">
+  Password to decrypt `tlsCertificateKeyFile`.
+</ParamField>
+
+<ParamField path="poolSize" type="number">
+  Maximum number of connections in the connection pool. Mapped to the MongoDB driver's `maxPoolSize`.
+</ParamField>
+
+<ParamField path="minPoolSize" type="number">
+  Minimum number of connections to maintain in the pool.
+</ParamField>
+
+<ParamField path="connectTimeoutMS" type="number" default="30000">
+  Milliseconds to wait for a connection before timing out.
+</ParamField>
+
+<ParamField path="socketTimeoutMS" type="number" default="360000">
+  Milliseconds to wait on a socket send/receive before timing out.
+</ParamField>
+
+<ParamField path="retryWrites" type="boolean">
+  Enable retryable writes.
+</ParamField>
+
+<ParamField path="directConnection" type="boolean">
+  Force a single-host topology regardless of the connection string content.
+</ParamField>
+
+<ParamField path="forceServerObjectId" type="boolean" default="false">
+  Let the server assign `_id` values instead of the driver.
+</ParamField>
+
+<ParamField path="appName" type="string">
+  Application name logged in the MongoDB server log on connect.
+</ParamField>
+
+<ParamField path="extra" type="object">
+  Passed directly to the `MongoClient` constructor. See [MongoDB Connection Options](https://mongodb.github.io/node-mongodb-native/6.16/interfaces/MongoClientOptions.html).
+</ParamField>
+
+## Defining entities
+
+MongoDB entities use `@ObjectIdColumn` instead of `@PrimaryColumn` or `@PrimaryGeneratedColumn`.
+
+```typescript
+import { ObjectId } from "mongodb"
+import { Entity, ObjectIdColumn, Column } from "typeorm"
+
+@Entity()
+export class User {
+    @ObjectIdColumn()
+    _id: ObjectId
+
+    @Column()
+    firstName: string
+
+    @Column()
+    lastName: string
+
+    @Column()
+    isActive: boolean
+}
+```
+
+## Subdocuments (embedded documents)
+
+MongoDB stores nested objects natively. Define subdocument classes and embed them with `@Column`:
+
+```typescript
+import { Column } from "typeorm"
+
+export class Profile {
+    @Column()
+    about: string
+
+    @Column()
+    education: string
+
+    @Column()
+    career: string
+}
+
+export class Photo {
+    @Column()
+    url: string
+
+    @Column()
+    description: string
+
+    @Column()
+    size: number
+
+    constructor(url: string, description: string, size: number) {
+        this.url = url
+        this.description = description
+        this.size = size
+    }
+}
+```
+
+```typescript
+import { Entity, ObjectId, ObjectIdColumn, Column } from "typeorm"
+import { Profile, Photo } from "./subdocuments"
+
+@Entity()
+export class User {
+    @ObjectIdColumn()
+    id: ObjectId
+
+    @Column()
+    firstName: string
+
+    @Column()
+    lastName: string
+
+    @Column((type) => Profile)
+    profile: Profile
+
+    @Column((type) => Photo)
+    photos: Photo[]
+}
+```
+
+Saving this entity produces the following MongoDB document:
+
+```json
+{
+    "firstName": "Timber",
+    "lastName": "Saw",
+    "profile": {
+        "about": "About Trees and Me",
+        "education": "Tree School",
+        "career": "Lumberjack"
+    },
+    "photos": [
+        { "url": "me-and-trees.jpg", "description": "Me and Trees", "size": 100 },
+        { "url": "me-and-chakram.jpg", "description": "Me and Chakram", "size": 200 }
+    ]
+}
+```
+
+## MongoRepository and MongoEntityManager
+
+Use `getMongoRepository` or `getMongoManager` to access MongoDB-specific methods not available on the standard `Repository` and `EntityManager`:
+
+```typescript
+const userRepo = dataSource.getMongoRepository(User)
+
+// Standard find
+const users = await userRepo.findBy({ isActive: true })
+
+// MongoDB query operators
+const youngUsers = await userRepo.find({
+    where: { age: { $lt: 30 } },
+})
+
+const adminsOrEditors = await userRepo.find({
+    where: { $or: [{ role: "admin" }, { role: "editor" }] },
+})
+
+// Querying subdocuments
+const treeSchoolUsers = await userRepo.find({
+    where: { "profile.education": { $eq: "Tree School" } },
+})
+
+// Querying subdocument arrays
+const usersWithSmallPhotos = await userRepo.find({
+    where: { "photos.size": { $lt: 150 } },
+})
+```
+
+### MongoDB-specific methods
+
+Both `MongoRepository` and `MongoEntityManager` expose methods that map directly to the MongoDB driver API:
+
+<AccordionGroup>
+  <Accordion title="Cursors">
+    - `createCursor(query)` — Returns a raw MongoDB cursor for iterating over results.
+    - `createEntityCursor(query)` — Returns a cursor that maps results to entity instances.
+  </Accordion>
+  <Accordion title="Aggregation and bulk operations">
+    - `aggregate(pipeline)` — Execute an aggregation pipeline.
+    - `bulkWrite(operations)` — Perform a bulk write without a fluent API.
+    - `insertOne(document)` — Insert a single document.
+    - `insertMany(documents)` — Insert multiple documents.
+    - `updateOne(filter, update)` — Update the first matching document.
+    - `updateMany(filter, update)` — Update all matching documents.
+    - `replaceOne(filter, replacement)` — Replace the first matching document.
+    - `deleteOne(filter)` — Delete the first matching document.
+    - `deleteMany(filter)` — Delete all matching documents.
+  </Accordion>
+  <Accordion title="Atomic operations">
+    - `findOneAndDelete(filter)` — Find and delete in one atomic operation.
+    - `findOneAndReplace(filter, replacement)` — Find and replace in one atomic operation.
+    - `findOneAndUpdate(filter, update)` — Find and update in one atomic operation.
+  </Accordion>
+  <Accordion title="Index management">
+    - `createCollectionIndex(fieldOrSpec, options)` — Create an index.
+    - `createCollectionIndexes(indexSpecs)` — Create multiple indexes.
+    - `dropCollectionIndex(indexName)` — Drop a named index.
+    - `dropCollectionIndexes()` — Drop all indexes.
+    - `collectionIndexes()` — List all index information.
+    - `collectionIndexExists(indexNames)` — Check if an index exists.
+    - `listCollectionIndexes()` — Get index information for the collection.
+    - `reIndex()` — Rebuild all indexes (blocking operation).
+  </Accordion>
+  <Accordion title="Collection utilities">
+    - `count(query)` — Count matching documents.
+    - `countDocuments(query)` — Count matching documents.
+    - `distinct(key, query)` — Return distinct values for a key.
+    - `isCapped()` — Check whether the collection is capped.
+    - `rename(newName, options)` — Rename the collection.
+    - `initializeOrderedBulkOp()` — Ordered bulk write operation.
+    - `initializeUnorderedBulkOp()` — Unordered bulk write operation.
+    - `parallelCollectionScan(options)` — Return parallel cursors for the collection.
+  </Accordion>
+</AccordionGroup>
+
+## Limitations and notes
+
+<Warning>
+  TypeORM relations (`@OneToOne`, `@ManyToOne`, `@OneToMany`, `@ManyToMany`) are **not supported** in MongoDB. Use subdocuments or store references as plain `ObjectId` fields and resolve them manually.
+</Warning>
+
+- Transactions are not supported through TypeORM's transaction API on MongoDB.
+- `query()` and `transaction()` methods on `EntityManager` are not available for MongoDB.
+- The `synchronize: true` option creates collections but does not enforce schemas. MongoDB is schemaless.
+- Join operations (`leftJoinAndSelect`, etc.) do not work with MongoDB.
+- Use MongoDB v7 driver or later. Earlier versions are not supported.

@@ -1,0 +1,140 @@
+---
+title: "Using migrations with Vite"
+description: "Configure Vite to avoid class name mangling that breaks TypeORM migration detection in production builds."
+---
+
+Using TypeORM in a Vite project works without any special configuration in development. However, when you build for production, you will encounter errors like:
+
+```
+...migration name is wrong. Migration class name should have a JavaScript timestamp appended.
+```
+
+This happens because Vite's production build [minifies code by default](https://vite.dev/config/build-options#build-minify), which includes mangling class names to reduce file size. TypeORM identifies migrations by their class names (which must end with a timestamp), so mangling breaks this detection.
+
+## Base configuration
+
+The examples below show diffs against this baseline `vite.config.ts`:
+
+```typescript vite.config.ts
+import legacy from "@vitejs/plugin-legacy"
+import vue from "@vitejs/plugin-vue"
+import path from "path"
+import { defineConfig } from "vite"
+
+export default defineConfig({
+    build: {
+        sourcemap: true,
+    },
+    plugins: [vue(), legacy()],
+    resolve: {
+        alias: {
+            "@": path.resolve(__dirname, "./src"),
+        },
+    },
+})
+```
+
+## Option 1: Disable minification entirely
+
+The simplest fix is to turn off minification completely. This results in significantly larger production bundles.
+
+```typescript vite.config.ts
+import legacy from "@vitejs/plugin-legacy"
+import vue from "@vitejs/plugin-vue"
+import path from "path"
+import { defineConfig } from "vite"
+
+export default defineConfig({
+    build: {
+        sourcemap: true,
+        minify: false,  // Added
+    },
+    plugins: [vue(), legacy()],
+    resolve: {
+        alias: {
+            "@": path.resolve(__dirname, "./src"),
+        },
+    },
+})
+```
+
+<Warning>
+  Disabling minification entirely increases bundle sizes significantly. Use this only if the other options are not viable.
+</Warning>
+
+## Option 2: Disable esbuild identifier mangling
+
+Vite uses esbuild as its default minifier. You can keep most minification optimizations while only disabling identifier renaming:
+
+```typescript vite.config.ts
+import legacy from "@vitejs/plugin-legacy"
+import vue from "@vitejs/plugin-vue"
+import path from "path"
+import { defineConfig } from "vite"
+
+export default defineConfig({
+    build: {
+        sourcemap: true,
+    },
+    esbuild: { minifyIdentifiers: false },  // Added
+    plugins: [vue(), legacy()],
+    resolve: {
+        alias: {
+            "@": path.resolve(__dirname, "./src"),
+        },
+    },
+})
+```
+
+This produces smaller bundles than disabling minification entirely, but keeps all identifiers at full length—which reduces the compression benefit on large codebases.
+
+## Option 3: Use Terser and preserve migration class names
+
+The most targeted option switches Vite's minifier from esbuild to [Terser](https://terser.org), which supports regex-based class name preservation. This preserves only the TypeORM migration class names while minifying everything else.
+
+<Steps>
+  <Step title="Install Terser">
+    ```bash
+    npm add -D terser
+    ```
+  </Step>
+  <Step title="Update vite.config.ts">
+    ```typescript vite.config.ts
+    import legacy from "@vitejs/plugin-legacy"
+    import vue from "@vitejs/plugin-vue"
+    import path from "path"
+    import { defineConfig } from "vite"
+
+    export default defineConfig({
+        build: {
+            sourcemap: true,
+            minify: "terser",  // Added
+            terserOptions: {    // Added
+                mangle: { keep_classnames: /^Migrations\d+$/ },
+                compress: { keep_classnames: /^Migrations\d+$/ },
+            },
+        },
+        plugins: [vue(), legacy()],
+        resolve: {
+            alias: {
+                "@": path.resolve(__dirname, "./src"),
+            },
+        },
+    })
+    ```
+  </Step>
+</Steps>
+
+The regex `/^Migrations\d+$/` matches class names that start with `Migrations` followed by digits—the pattern TypeORM uses for generated migration class names.
+
+<Tip>
+  Option 3 gives the best balance: full minification everywhere except migration class names, at the cost of a slower build (Terser is slower than esbuild).
+</Tip>
+
+## Comparison
+
+| Option | Bundle size | Build speed | Class names preserved |
+|--------|------------|-------------|----------------------|
+| Option 1: Disable minify | Largest | Fastest | All |
+| Option 2: Disable esbuild identifiers | Medium | Fast | All |
+| Option 3: Terser with regex | Smallest | Slowest | Migration classes only |

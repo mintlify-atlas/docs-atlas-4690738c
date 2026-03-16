@@ -1,0 +1,726 @@
+---
+title: "Select query builder"
+description: "Build and execute SELECT queries with TypeORM's SelectQueryBuilder. Covers joins, WHERE conditions, pagination, locking, subqueries, and result retrieval."
+---
+
+## What is QueryBuilder?
+
+`QueryBuilder` is one of TypeORM's most powerful features. It lets you construct SQL queries using a fluent, chainable API, execute them, and receive automatically mapped entity instances.
+
+```typescript
+const user = await dataSource
+    .getRepository(User)
+    .createQueryBuilder("user")
+    .where("user.id = :id", { id: 1 })
+    .getOne()
+```
+
+This produces:
+
+```sql
+SELECT user.id AS userId, user.firstName AS userFirstName, user.lastName AS userLastName
+FROM users user
+WHERE user.id = 1
+```
+
+and returns a typed `User` instance:
+
+```typescript
+User { id: 1, firstName: "Timber", lastName: "Saw" }
+```
+
+## Creating a SelectQueryBuilder
+
+You can obtain a `SelectQueryBuilder` from three entry points:
+
+<CodeGroup>
+
+```typescript Via DataSource
+const user = await dataSource
+    .createQueryBuilder()
+    .select("user")
+    .from(User, "user")
+    .where("user.id = :id", { id: 1 })
+    .getOne()
+```
+
+```typescript Via EntityManager
+const user = await dataSource.manager
+    .createQueryBuilder(User, "user")
+    .where("user.id = :id", { id: 1 })
+    .getOne()
+```
+
+```typescript Via Repository
+const user = await dataSource
+    .getRepository(User)
+    .createQueryBuilder("user")
+    .where("user.id = :id", { id: 1 })
+    .getOne()
+```
+
+</CodeGroup>
+
+The string argument to `createQueryBuilder` is the **alias** for the main table. It is equivalent to:
+
+```typescript
+createQueryBuilder().select("user").from(User, "user")
+// → SELECT ... FROM users user
+```
+
+## Selecting columns
+
+By default, all mapped columns are selected. To select specific columns, pass an array of property paths:
+
+```typescript
+const users = await dataSource
+    .getRepository(User)
+    .createQueryBuilder("user")
+    .select(["user.id", "user.name"])
+    .getMany()
+```
+
+Use `addSelect` to append additional columns without replacing the existing selection:
+
+```typescript
+const users = await dataSource
+    .getRepository(User)
+    .createQueryBuilder()
+    .select("user.id", "id")
+    .addSelect("user.password")
+    .getMany()
+```
+
+### Hidden columns
+
+Columns decorated with `@Column({ select: false })` are excluded from results by default. Use `addSelect` to retrieve them explicitly:
+
+```typescript
+@Entity()
+export class User {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    @Column({ select: false })
+    password: string
+}
+```
+
+```typescript
+const users = await dataSource
+    .getRepository(User)
+    .createQueryBuilder("user")
+    .select("user.id")
+    .addSelect("user.password")
+    .getMany()
+```
+
+### DISTINCT ON (PostgreSQL only)
+
+`DISTINCT ON` must match the leftmost `ORDER BY` expression:
+
+```typescript
+const users = await dataSource
+    .getRepository(User)
+    .createQueryBuilder("user")
+    .distinctOn(["user.id"])
+    .orderBy("user.id")
+    .getMany()
+// → SELECT DISTINCT ON (user.id) ... FROM users user ORDER BY user.id
+```
+
+## Using parameters to escape data
+
+Always use named parameters instead of string concatenation to prevent SQL injection:
+
+```typescript
+// Correct — parameterized
+.where("user.name = :name", { name: "Timber" })
+
+// Equivalent explicit form
+.where("user.name = :name")
+.setParameter("name", "Timber")
+```
+
+For `IN` clauses, use the spread syntax `(:...name)`:
+
+```typescript
+.where("user.name IN (:...names)", { names: ["Timber", "Crystal", "Lina"] })
+// → WHERE user.name IN ('Timber', 'Crystal', 'Lina')
+```
+
+<Warning>
+Do not reuse the same parameter name for different values in a single query builder instance. The second assignment will silently overwrite the first.
+
+```typescript
+// Wrong — :id is used twice with different values
+.where("user.linkedSheep = :id", { id: sheepId })
+.andWhere("user.linkedCow = :id", { id: cowId })
+
+// Correct — unique names
+.where("user.linkedSheep = :sheepId", { sheepId })
+.andWhere("user.linkedCow = :cowId", { cowId })
+```
+</Warning>
+
+## WHERE conditions
+
+### Basic where
+
+```typescript
+createQueryBuilder("user").where("user.name = :name", { name: "Timber" })
+// → WHERE user.name = 'Timber'
+```
+
+Calling `.where()` more than once replaces all previous conditions.
+
+### andWhere / orWhere
+
+```typescript
+// AND
+createQueryBuilder("user")
+    .where("user.firstName = :firstName", { firstName: "Timber" })
+    .andWhere("user.lastName = :lastName", { lastName: "Saw" })
+// → WHERE user.firstName = 'Timber' AND user.lastName = 'Saw'
+
+// OR
+createQueryBuilder("user")
+    .where("user.firstName = :firstName", { firstName: "Timber" })
+    .orWhere("user.lastName = :lastName", { lastName: "Saw" })
+// → WHERE user.firstName = 'Timber' OR user.lastName = 'Saw'
+```
+
+<Warning>
+Be careful with `orWhere` in complex queries. Because `AND` and `OR` expressions stack without implicit grouping, mixing them can produce unexpected results. Use `Brackets` to make precedence explicit.
+</Warning>
+
+### Brackets and NotBrackets
+
+Use `Brackets` to group conditions into a parenthesized sub-expression:
+
+```typescript
+import { Brackets } from "typeorm"
+
+createQueryBuilder("user")
+    .where("user.registered = :registered", { registered: true })
+    .andWhere(
+        new Brackets((qb) => {
+            qb.where("user.firstName = :firstName", { firstName: "Timber" })
+              .orWhere("user.lastName = :lastName", { lastName: "Saw" })
+        }),
+    )
+// → WHERE user.registered = true AND (user.firstName = 'Timber' OR user.lastName = 'Saw')
+```
+
+Use `NotBrackets` to negate the group:
+
+```typescript
+import { NotBrackets } from "typeorm"
+
+createQueryBuilder("user")
+    .where("user.registered = :registered", { registered: true })
+    .andWhere(
+        new NotBrackets((qb) => {
+            qb.where("user.firstName = :firstName", { firstName: "Timber" })
+              .orWhere("user.lastName = :lastName", { lastName: "Saw" })
+        }),
+    )
+// → WHERE user.registered = true AND NOT((user.firstName = 'Timber' OR user.lastName = 'Saw'))
+```
+
+## Joins
+
+Given these two entities:
+
+```typescript
+@Entity()
+export class User {
+    @PrimaryGeneratedColumn() id: number
+    @Column() name: string
+    @OneToMany(() => Photo, (photo) => photo.user)
+    photos: Photo[]
+}
+
+@Entity()
+export class Photo {
+    @PrimaryGeneratedColumn() id: number
+    @Column() url: string
+    @ManyToOne(() => User, (user) => user.photos)
+    user: User
+}
+```
+
+### leftJoinAndSelect / innerJoinAndSelect
+
+Join a relation and include it in the result:
+
+```typescript
+// LEFT JOIN — returns the user even if they have no photos
+const user = await dataSource
+    .createQueryBuilder("user")
+    .leftJoinAndSelect("user.photos", "photo")
+    .where("user.name = :name", { name: "Timber" })
+    .getOne()
+
+// INNER JOIN — only returns users who have at least one photo
+const user = await dataSource
+    .createQueryBuilder("user")
+    .innerJoinAndSelect("user.photos", "photo")
+    .where("user.name = :name", { name: "Timber" })
+    .getOne()
+```
+
+You can filter on the join condition directly instead of adding it to `WHERE`:
+
+```typescript
+const user = await dataSource
+    .createQueryBuilder("user")
+    .leftJoinAndSelect(
+        "user.photos",
+        "photo",
+        "photo.isRemoved = :isRemoved",
+        { isRemoved: false },
+    )
+    .where("user.name = :name", { name: "Timber" })
+    .getOne()
+// → LEFT JOIN photos photo ON photo.user = user.id AND photo.isRemoved = FALSE
+```
+
+### leftJoin / innerJoin (without selection)
+
+Join to filter rows without including the joined data in results:
+
+```typescript
+const user = await dataSource
+    .createQueryBuilder("user")
+    .innerJoin("user.photos", "photo")
+    .where("user.name = :name", { name: "Timber" })
+    .getOne()
+// → SELECT user.* FROM users user INNER JOIN photos photo ON photo.user = user.id ...
+```
+
+### Joining unrelated entities or tables
+
+```typescript
+// Join by entity class
+const users = await dataSource
+    .createQueryBuilder("user")
+    .leftJoinAndSelect(Photo, "photo", "photo.userId = user.id")
+    .getMany()
+
+// Join by table name string
+const users = await dataSource
+    .createQueryBuilder("user")
+    .leftJoinAndSelect("photos", "photo", "photo.userId = user.id")
+    .getMany()
+```
+
+### leftJoinAndMapOne / leftJoinAndMapMany
+
+Map joined data to a non-relation property on the entity:
+
+```typescript
+// Map a single joined entity
+const user = await dataSource
+    .createQueryBuilder("user")
+    .leftJoinAndMapOne(
+        "user.profilePhoto",
+        "user.photos",
+        "photo",
+        "photo.isForProfile = TRUE",
+    )
+    .where("user.name = :name", { name: "Timber" })
+    .getOne()
+```
+
+Use `leftJoinAndMapMany` when the mapped property should hold an array.
+
+## ORDER BY
+
+```typescript
+// Single column
+createQueryBuilder("user").orderBy("user.id")
+createQueryBuilder("user").orderBy("user.id", "DESC")
+
+// Multiple columns using addOrderBy
+createQueryBuilder("user")
+    .orderBy("user.name")
+    .addOrderBy("user.id")
+
+// Map syntax
+createQueryBuilder("user").orderBy({
+    "user.name": "ASC",
+    "user.id": "DESC",
+})
+```
+
+Calling `.orderBy()` more than once replaces all previous `ORDER BY` expressions.
+
+## GROUP BY and HAVING
+
+```typescript
+// GROUP BY
+createQueryBuilder("user")
+    .groupBy("user.name")
+    .addGroupBy("user.id")
+
+// HAVING
+createQueryBuilder("user")
+    .having("user.firstName = :firstName", { firstName: "Timber" })
+    .andHaving("user.lastName = :lastName", { lastName: "Saw" })
+
+// Combined
+const photosSums = await dataSource
+    .getRepository(User)
+    .createQueryBuilder("user")
+    .select("user.id")
+    .addSelect("SUM(user.photosCount)", "sum")
+    .groupBy("user.id")
+    .having("SUM(user.photosCount) > :min", { min: 5 })
+    .getRawMany()
+```
+
+## Pagination
+
+<Tabs>
+  <Tab title="take / skip (recommended)">
+    Use `take` and `skip` when your query includes joins or subqueries. TypeORM handles the pagination in a way that produces correct results even with complex queries.
+
+    ```typescript
+    const users = await dataSource
+        .getRepository(User)
+        .createQueryBuilder("user")
+        .leftJoinAndSelect("user.photos", "photo")
+        .skip(10)   // offset: skip the first 10
+        .take(5)    // limit: return up to 5
+        .getMany()
+    ```
+  </Tab>
+  <Tab title="limit / offset (raw SQL)">
+    `limit` and `offset` map directly to the SQL clauses and may not behave correctly with joins.
+
+    ```typescript
+    createQueryBuilder("user").limit(10)
+    // → SELECT ... FROM users user LIMIT 10
+
+    createQueryBuilder("user").offset(10)
+    // → SELECT ... FROM users user OFFSET 10
+    ```
+  </Tab>
+</Tabs>
+
+<Note>
+`take`/`skip` and `limit`/`offset` produce different SQL. For paginated endpoints that involve joins, always prefer `take`/`skip`.
+</Note>
+
+## Retrieving results
+
+<AccordionGroup>
+  <Accordion title="getOne / getOneOrFail">
+    Returns a single entity or `null`. `getOneOrFail` throws `EntityNotFoundError` when no row matches.
+
+    ```typescript
+    const user = await dataSource
+        .getRepository(User)
+        .createQueryBuilder("user")
+        .where("user.id = :id OR user.name = :name", { id: 1, name: "Timber" })
+        .getOne()      // → User | null
+
+    const user = await dataSource
+        .getRepository(User)
+        .createQueryBuilder("user")
+        .where("user.id = :id", { id: 1 })
+        .getOneOrFail() // → User (throws if not found)
+    ```
+  </Accordion>
+  <Accordion title="getMany">
+    Returns all matching entities as an array.
+
+    ```typescript
+    const users = await dataSource
+        .getRepository(User)
+        .createQueryBuilder("user")
+        .getMany()
+    ```
+  </Accordion>
+  <Accordion title="getRawOne / getRawMany">
+    Returns plain objects instead of entity instances. Use these when you select aggregates or expressions that do not map to entity columns.
+
+    ```typescript
+    const { sum } = await dataSource
+        .getRepository(User)
+        .createQueryBuilder("user")
+        .select("SUM(user.photosCount)", "sum")
+        .where("user.id = :id", { id: 1 })
+        .getRawOne()
+
+    const photosSums = await dataSource
+        .getRepository(User)
+        .createQueryBuilder("user")
+        .select("user.id")
+        .addSelect("SUM(user.photosCount)", "sum")
+        .groupBy("user.id")
+        .getRawMany()
+    // → [{ id: 1, sum: 25 }, { id: 2, sum: 13 }, ...]
+    ```
+  </Accordion>
+  <Accordion title="getCount">
+    Returns the count of matching rows as a number.
+
+    ```typescript
+    const count = await dataSource
+        .getRepository(User)
+        .createQueryBuilder("user")
+        .where("user.name = :name", { name: "Timber" })
+        .getCount()
+    // → SELECT count(*) FROM users user WHERE user.name = 'Timber'
+    ```
+  </Accordion>
+  <Accordion title="stream">
+    Returns a Node.js `ReadStream` of raw rows. You are responsible for transforming raw data to entities.
+
+    ```typescript
+    const stream = await dataSource
+        .getRepository(User)
+        .createQueryBuilder("user")
+        .where("user.id = :id", { id: 1 })
+        .stream()
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Subqueries
+
+### In WHERE
+
+```typescript
+const posts = await dataSource
+    .getRepository(Post)
+    .createQueryBuilder("post")
+    .where((qb) => {
+        const subQuery = qb
+            .subQuery()
+            .select("user.name")
+            .from(User, "user")
+            .where("user.registered = :registered")
+            .getQuery()
+        return "post.title IN " + subQuery
+    })
+    .setParameter("registered", true)
+    .getMany()
+```
+
+Alternatively, build a separate query builder and merge its parameters:
+
+```typescript
+const userQb = dataSource
+    .getRepository(User)
+    .createQueryBuilder("user")
+    .select("user.name")
+    .where("user.registered = :registered", { registered: true })
+
+const posts = await dataSource
+    .getRepository(Post)
+    .createQueryBuilder("post")
+    .where("post.title IN (" + userQb.getQuery() + ")")
+    .setParameters(userQb.getParameters())
+    .getMany()
+```
+
+### In FROM
+
+```typescript
+const result = await dataSource
+    .createQueryBuilder()
+    .select("user.name", "name")
+    .from((subQuery) => {
+        return subQuery
+            .select("user.name", "name")
+            .from(User, "user")
+            .where("user.registered = :registered", { registered: true })
+    }, "user")
+    .getRawMany()
+```
+
+### In SELECT
+
+```typescript
+const posts = await dataSource
+    .createQueryBuilder()
+    .select("post.id", "id")
+    .addSelect((subQuery) => {
+        return subQuery.select("user.name", "name").from(User, "user").limit(1)
+    }, "name")
+    .from(Post, "post")
+    .getRawMany()
+```
+
+## Locking
+
+`SelectQueryBuilder` supports both pessimistic and optimistic locking. Locking requires an active transaction.
+
+### Lock modes
+
+| Lock mode | MySQL / MariaDB | PostgreSQL / CockroachDB | SQL Server | Oracle |
+|---|---|---|---|---|
+| `pessimistic_read` | `LOCK IN SHARE MODE` / `FOR SHARE` | `FOR SHARE` | `WITH (HOLDLOCK, ROWLOCK)` | `FOR UPDATE` |
+| `pessimistic_write` | `FOR UPDATE` | `FOR UPDATE` | `WITH (UPDLOCK, ROWLOCK)` | `FOR UPDATE` |
+| `dirty_read` | (nothing) | (nothing) | `WITH (NOLOCK)` | (nothing) |
+| `for_no_key_update` | — | `FOR NO KEY UPDATE` | — | — |
+| `for_key_share` | — | `FOR KEY SHARE` | — | — |
+
+An unsupported lock mode throws `LockNotSupportedOnGivenDriverError`.
+
+```typescript
+// Pessimistic read
+const users = await dataSource
+    .getRepository(User)
+    .createQueryBuilder("user")
+    .setLock("pessimistic_read")
+    .getMany()
+
+// Pessimistic write
+const users = await dataSource
+    .getRepository(User)
+    .createQueryBuilder("user")
+    .setLock("pessimistic_write")
+    .getMany()
+
+// Optimistic locking — works with @Version or @UpdateDateColumn
+const users = await dataSource
+    .getRepository(User)
+    .createQueryBuilder("user")
+    .setLock("optimistic", existingUser.version)
+    .getMany()
+```
+
+### Lock tables (PostgreSQL / CockroachDB only)
+
+```typescript
+const posts = await dataSource
+    .getRepository(Post)
+    .createQueryBuilder("post")
+    .leftJoin("post.author", "user")
+    .setLock("pessimistic_write", undefined, ["post"])
+    .getMany()
+// → ... FOR UPDATE OF post
+```
+
+### setOnLocked
+
+Control behaviour when a locked row is encountered:
+
+```typescript
+// Fail immediately instead of waiting
+.setLock("pessimistic_write").setOnLocked("nowait")
+
+// Skip locked rows
+.setLock("pessimistic_write").setOnLocked("skip_locked")
+```
+
+## Extra options
+
+### Max execution time
+
+Drop queries that exceed a time limit to protect the server:
+
+```typescript
+const users = await dataSource
+    .getRepository(User)
+    .createQueryBuilder("user")
+    .maxExecutionTime(1000) // milliseconds
+    .getMany()
+```
+
+### Custom index (MySQL only)
+
+```typescript
+const users = await dataSource
+    .getRepository(User)
+    .createQueryBuilder("user")
+    .useIndex("my_index")
+    .getMany()
+```
+
+### Including soft-deleted rows
+
+When an entity uses `@DeleteDateColumn`, soft-deleted rows are excluded by default. Use `withDeleted()` to include them:
+
+```typescript
+const users = await dataSource
+    .getRepository(User)
+    .createQueryBuilder("user")
+    .withDeleted()
+    .getMany()
+```
+
+### Common table expressions (CTE)
+
+CTEs are supported for all databases except Oracle.
+
+```typescript
+const users = await dataSource
+    .getRepository(User)
+    .createQueryBuilder("user")
+    .select("user.id", "id")
+    .addCommonTableExpression(
+        `SELECT "userId" FROM "post"`,
+        "post_users_ids",
+    )
+    .where(`user.id IN (SELECT "userId" FROM 'post_users_ids')`)
+    .getMany()
+```
+
+You can also pass another query builder as the CTE source (PostgreSQL):
+
+```typescript
+const insertQb = dataSource
+    .getRepository(User)
+    .createQueryBuilder()
+    .insert({ name: "John Smith" })
+    .returning(["id"])
+
+const users = await dataSource
+    .getRepository(User)
+    .createQueryBuilder("user")
+    .addCommonTableExpression(insertQb, "insert_results")
+    .where(`user.id IN (SELECT "id" FROM 'insert_results')`)
+    .getMany()
+```
+
+### Time Travel Queries (CockroachDB only)
+
+```typescript
+const account = await repository
+    .createQueryBuilder("account")
+    .timeTravelQuery(`'-1h'`)
+    .getOneOrFail()
+```
+
+When called with no argument, `timeTravelQuery()` uses `follower_read_timestamp()`. See the [CockroachDB AS OF SYSTEM TIME docs](https://www.cockroachlabs.com/docs/stable/as-of-system-time.html) for supported expressions.
+
+## Debugging
+
+```typescript
+// Get the SQL string with placeholder markers
+const sql = dataSource
+    .getRepository(User)
+    .createQueryBuilder("user")
+    .where("user.id = :id", { id: 1 })
+    .getQuery()
+
+// Get both SQL and its parameter values
+const [query, params] = dataSource
+    .getRepository(User)
+    .createQueryBuilder("user")
+    .where("user.id = :id", { id: 1 })
+    .getQueryAndParameters()
+
+// Log query through the configured logger while executing
+const users = await dataSource
+    .getRepository(User)
+    .createQueryBuilder("user")
+    .where("user.firstName = :firstName", { firstName: "Timber" })
+    .logQuery()
+    .getMany()
+```

@@ -1,0 +1,178 @@
+---
+title: "Update query builder"
+description: "Build and execute UPDATE queries with TypeORM's UpdateQueryBuilder. Covers conditional updates, raw SQL expressions, RETURNING/OUTPUT, and relation updates."
+---
+
+## Basic update
+
+Use `UpdateQueryBuilder` to build `UPDATE` statements. This is the most efficient way to update entities in your database — it does not load entities first and executes a single SQL statement.
+
+```typescript
+await dataSource
+    .createQueryBuilder()
+    .update(User)
+    .set({ firstName: "Timber", lastName: "Saw" })
+    .where("id = :id", { id: 1 })
+    .execute()
+```
+
+This produces:
+
+```sql
+UPDATE users SET firstName = 'Timber', lastName = 'Saw' WHERE id = 1
+```
+
+The `execute()` method returns an `UpdateResult` with the number of affected rows.
+
+## Conditional update
+
+Use `where`, `andWhere`, and `orWhere` to apply any condition:
+
+```typescript
+// Simple AND condition
+await dataSource
+    .createQueryBuilder()
+    .update(User)
+    .set({ isActive: false })
+    .where("lastLogin < :cutoff", { cutoff: new Date("2023-01-01") })
+    .andWhere("isActive = :active", { active: true })
+    .execute()
+```
+
+Multiple calls to `.where()` replace previous conditions. Use `andWhere` / `orWhere` to add conditions without overwriting:
+
+```typescript
+await dataSource
+    .createQueryBuilder()
+    .update(Post)
+    .set({ published: true })
+    .where("post.status = :status", { status: "approved" })
+    .orWhere("post.featured = :featured", { featured: true })
+    .execute()
+```
+
+## Raw SQL expressions
+
+When the new value must be a SQL expression (for example an increment), provide a function instead of a literal:
+
+```typescript
+await dataSource
+    .createQueryBuilder()
+    .update(User)
+    .set({
+        firstName: "Timber",
+        lastName: "Saw",
+        age: () => "age + 1",          // SQL expression
+        updatedAt: () => "CURRENT_TIMESTAMP",
+    })
+    .where("id = :id", { id: 1 })
+    .execute()
+```
+
+<Warning>
+Raw SQL expressions are inserted verbatim into the query. Never build them from user-supplied input.
+</Warning>
+
+## Update with RETURNING / OUTPUT
+
+Use `.returning()` to receive the updated rows' column values back from the database. The alias `.output()` is equivalent and can be used for SQL Server readability.
+
+<Tabs>
+  <Tab title="PostgreSQL / CockroachDB / Spanner">
+    ```typescript
+    const result = await dataSource
+        .createQueryBuilder()
+        .update(User)
+        .set({ firstName: "Timber" })
+        .where("id = :id", { id: 1 })
+        .returning(["id", "firstName", "updatedAt"])
+        .execute()
+
+    console.log(result.raw)
+    // → [{ id: 1, firstName: 'Timber', updatedAt: '2024-01-01T...' }]
+    ```
+  </Tab>
+  <Tab title="SQL Server (OUTPUT)">
+    ```typescript
+    const result = await dataSource
+        .createQueryBuilder()
+        .update(User)
+        .set({ firstName: "Timber" })
+        .where("id = :id", { id: 1 })
+        .output(["id", "firstName"])
+        .execute()
+    // Produces: UPDATE users SET firstName = ... OUTPUT INSERTED.id, INSERTED.firstName WHERE id = 1
+    ```
+  </Tab>
+</Tabs>
+
+<Note>
+`RETURNING` is supported by PostgreSQL, CockroachDB, and Google Spanner. `OUTPUT` is supported by SQL Server. MySQL, SQLite, and other databases do not support this clause — calling `.returning()` on them throws `ReturningStatementNotSupportedError`.
+</Note>
+
+## Updating by entity
+
+Use `whereEntity()` to scope the update to specific entity instances. TypeORM extracts the primary key values and builds the `WHERE` clause automatically:
+
+```typescript
+const user = await dataSource.getRepository(User).findOneByOrFail({ id: 1 })
+
+await dataSource
+    .createQueryBuilder()
+    .update(User)
+    .set({ firstName: "Timber" })
+    .whereEntity(user)
+    .execute()
+```
+
+Pass an array to update multiple entities at once:
+
+```typescript
+await dataSource
+    .createQueryBuilder()
+    .update(User)
+    .set({ isActive: false })
+    .whereEntity(staleUsers)
+    .execute()
+```
+
+## Controlling entity update after execution
+
+When `updateEntity` is enabled (the default), TypeORM uses `RETURNING` or an extra `SELECT` to refresh the entity after the update. Disable this when you do not need the updated values back:
+
+```typescript
+await dataSource
+    .createQueryBuilder()
+    .update(User)
+    .set({ counter: () => "counter + 1" })
+    .where("id = :id", { id: 1 })
+    .updateEntity(false)  // skip the extra SELECT / RETURNING
+    .execute()
+```
+
+## ORDER BY and LIMIT (MySQL only)
+
+MySQL supports `ORDER BY` and `LIMIT` on `UPDATE` statements:
+
+```typescript
+await dataSource
+    .createQueryBuilder()
+    .update(User)
+    .set({ isActive: false })
+    .orderBy("createdAt", "ASC")
+    .limit(100)
+    .execute()
+```
+
+<Note>
+`LIMIT` on `UPDATE` is only supported by MySQL and MariaDB. Using it on other drivers throws `LimitOnUpdateNotSupportedError`.
+</Note>
+
+## Automatic column updates
+
+When the target entity has a `@VersionColumn` or `@UpdateDateColumn`, TypeORM automatically increments / sets those columns during a `UpdateQueryBuilder` execution:
+
+- `@VersionColumn` — incremented by `1` (`version = version + 1`)
+- `@UpdateDateColumn` — set to `CURRENT_TIMESTAMP`
+
+This happens transparently without any additional configuration.

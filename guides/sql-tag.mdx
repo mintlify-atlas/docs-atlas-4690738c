@@ -1,0 +1,146 @@
+---
+title: SQL tag
+description: Write raw SQL queries using a template literal tag that handles parameterization automatically for every supported database.
+---
+
+TypeORM provides an `sql` template literal tag for writing raw SQL queries. It handles parameter formatting automatically based on your database type, preventing SQL injection without requiring you to manage placeholder syntax manually.
+
+The `sql` tag is available on `DataSource`, `EntityManager`, `Repository`, and `QueryRunner` instances.
+
+## Basic usage
+
+```typescript
+const users = await dataSource.sql`SELECT * FROM users WHERE name = ${'John'}`
+```
+
+The expression `${'John'}` is extracted as a bound parameter — the value is never interpolated directly into the SQL string.
+
+## Parameter handling per database
+
+The placeholder syntax differs by database. The `sql` tag handles this for you — you always write `${value}` and TypeORM produces the correct placeholder:
+
+<Tabs>
+  <Tab title="PostgreSQL / CockroachDB">
+    ```typescript
+    // Produces: SELECT * FROM users WHERE name = $1
+    const users = await dataSource.sql`
+        SELECT * FROM users WHERE name = ${'John'}
+    `
+    ```
+  </Tab>
+  <Tab title="MySQL / MariaDB / SQLite">
+    ```typescript
+    // Produces: SELECT * FROM users WHERE name = ?
+    const users = await dataSource.sql`
+        SELECT * FROM users WHERE name = ${'John'}
+    `
+    ```
+  </Tab>
+  <Tab title="Oracle">
+    ```typescript
+    // Produces: SELECT * FROM users WHERE name = :1
+    const users = await dataSource.sql`
+        SELECT * FROM users WHERE name = ${'John'}
+    `
+    ```
+  </Tab>
+  <Tab title="MSSQL">
+    ```typescript
+    // Produces: SELECT * FROM users WHERE name = @1
+    const users = await dataSource.sql`
+        SELECT * FROM users WHERE name = ${'John'}
+    `
+    ```
+  </Tab>
+</Tabs>
+
+## Multiple parameters
+
+You can embed multiple expressions in a single query:
+
+```typescript
+const name = "John"
+const age = 30
+const active = true
+
+const users = await dataSource.sql`
+    SELECT * FROM users
+    WHERE name LIKE ${name + "%"}
+    AND age > ${age}
+    AND is_active = ${active}
+`
+```
+
+## Expanding arrays (IN clauses)
+
+To pass an array of values to an `IN (...)` expression, wrap the array in a function. TypeORM expands it into individual parameters:
+
+```typescript
+// Produces: SELECT * FROM users WHERE id IN (?, ?, ?) — or $1,$2,$3 etc.
+const users = await dataSource.sql`
+    SELECT * FROM users
+    WHERE id IN (${() => [1, 2, 3]})
+`
+```
+
+<Note>
+Wrapping in a function signals to TypeORM that the value should be expanded rather than passed as a single bound parameter.
+</Note>
+
+## Interpolating raw (unescaped) SQL
+
+To inject a string directly into the query without parameterizing it — for example, a dynamic table name or conditional clause — wrap the string in a function:
+
+```typescript
+// Produces: SELECT * FROM dynamic_table_name
+const tableName = "dynamic_table_name"
+const rows = await dataSource.sql`
+    SELECT * FROM ${() => tableName}
+`
+```
+
+<Warning>
+No escaping is applied to raw SQL injected this way. Never pass user-supplied input using the function wrapper — doing so opens your application to SQL injection attacks. Only use this pattern with values you fully control (e.g., hard-coded identifiers or values validated against a strict allowlist).
+</Warning>
+
+## Comparison with the `query` method
+
+The traditional `query` method requires you to maintain the parameter array and match placeholders manually:
+
+<CodeGroup>
+
+```typescript query method
+await dataSource.query(
+    "SELECT * FROM users WHERE name = $1 AND age > $2",
+    ["John", 30],
+)
+```
+
+```typescript sql tag
+await dataSource.sql`
+    SELECT * FROM users WHERE name = ${"John"} AND age > ${30}
+`
+```
+
+</CodeGroup>
+
+The `sql` tag keeps parameter values co-located with the SQL that uses them and adapts to the target database automatically, reducing the chance of a mismatch between the placeholder count and the parameter array.
+
+## Using the tag on other instances
+
+The same tag is available on any TypeORM instance that exposes a `query` method:
+
+```typescript
+// EntityManager
+const users = await manager.sql`SELECT * FROM users`
+
+// Repository
+const posts = await postRepository.sql`
+    SELECT * FROM posts WHERE author_id = ${authorId}
+`
+
+// QueryRunner (inside a transaction)
+const result = await queryRunner.sql`
+    UPDATE accounts SET balance = balance - ${amount} WHERE id = ${accountId}
+`
+```

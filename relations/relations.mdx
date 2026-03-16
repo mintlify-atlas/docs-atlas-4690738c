@@ -1,0 +1,241 @@
+---
+title: "Relations"
+description: "Connect entities using @OneToOne, @ManyToOne, @OneToMany, and @ManyToMany decorators. Configure cascades, join columns, and foreign key behavior."
+---
+
+## What are relations?
+
+Relations describe how entities connect to each other in your database. TypeORM models each SQL relationship type with a pair of decorators:
+
+<Columns cols={2}>
+  <Card title="@OneToOne" icon="arrow-right" href="/relations/one-to-one-relations">
+    Entity A has exactly one Entity B, and Entity B has exactly one Entity A.
+  </Card>
+  <Card title="@ManyToOne / @OneToMany" icon="arrow-right" href="/relations/many-to-one-one-to-many-relations">
+    Entity A has many instances of Entity B, but each Entity B belongs to one Entity A.
+  </Card>
+  <Card title="@ManyToMany" icon="arrow-right" href="/relations/many-to-many-relations">
+    Entity A has many instances of Entity B, and Entity B has many instances of Entity A.
+  </Card>
+  <Card title="Eager and lazy" icon="arrow-right" href="/relations/eager-and-lazy-relations">
+    Control when related data is fetched: always, on demand, or via Promise.
+  </Card>
+</Columns>
+
+## Relation options
+
+All relation decorators accept an options object as their last argument. The available options are:
+
+<ParamField path="eager" type="boolean" default="false">
+  When `true`, the relation is always loaded alongside the owner entity when using `find*` methods. Has no effect when using `QueryBuilder` — use `leftJoinAndSelect` instead.
+</ParamField>
+
+<ParamField path="cascade" type="boolean | ('insert' | 'update' | 'remove' | 'soft-remove' | 'recover')[]" default="false">
+  Controls which operations on the owner entity are propagated to the related entity. `true` enables all cascades. Pass an array to enable only specific operations.
+</ParamField>
+
+<ParamField path="nullable" type="boolean" default="true">
+  Whether the foreign key column allows `NULL`. Set to `false` to require the relation.
+</ParamField>
+
+<ParamField path="onDelete" type="'RESTRICT' | 'CASCADE' | 'SET NULL'" default="'RESTRICT'">
+  Database-level `ON DELETE` action for the foreign key.
+</ParamField>
+
+<ParamField path="onUpdate" type="'RESTRICT' | 'CASCADE' | 'SET NULL' | 'NO ACTION'" default="'RESTRICT'">
+  Database-level `ON UPDATE` action for the foreign key.
+</ParamField>
+
+<ParamField path="lazy" type="boolean" default="false">
+  When `true` (or when the property type is `Promise<T>`), the relation is loaded lazily on property access.
+</ParamField>
+
+<ParamField path="orphanedRowAction" type="'nullify' | 'delete' | 'soft-delete' | 'disable'" default="'disable'">
+  When a parent is saved with cascading enabled and a child that still exists in the database is no longer in the array, this option controls what happens to that child row.
+
+  - `delete` — removes the row from the database.
+  - `soft-delete` — marks the row as soft-deleted.
+  - `nullify` — sets the foreign key to `NULL`.
+  - `disable` — leaves the row untouched. You must remove it manually.
+</ParamField>
+
+<ParamField path="persistence" type="boolean" default="true">
+  When `false`, changes to this relation are not persisted automatically. Useful for performance optimization when you manage the relation separately.
+</ParamField>
+
+<ParamField path="createForeignKeyConstraints" type="boolean" default="true">
+  When `false`, no foreign key constraint is created in the database. Use this when you need a logical relation without a database constraint.
+</ParamField>
+
+## Cascades
+
+Cascades let you persist related entities automatically instead of saving each one individually.
+
+```typescript cascade: true example
+import {
+    Entity,
+    PrimaryGeneratedColumn,
+    Column,
+    ManyToMany,
+    JoinTable,
+} from "typeorm"
+import { Category } from "./Category"
+
+@Entity()
+export class Question {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    @Column()
+    title: string
+
+    @ManyToMany(() => Category, (category) => category.questions, {
+        cascade: true,
+    })
+    @JoinTable()
+    categories: Category[]
+}
+```
+
+When you save a `Question`, TypeORM automatically inserts or updates every `Category` instance in `question.categories`:
+
+```typescript
+const category1 = new Category()
+category1.name = "ORMs"
+
+const category2 = new Category()
+category2.name = "Programming"
+
+const question = new Question()
+question.title = "How to ask questions?"
+question.categories = [category1, category2]
+
+// category1 and category2 are inserted automatically
+await dataSource.manager.save(question)
+```
+
+### Granular cascade options
+
+Instead of enabling every cascade, pass an array of the operations you want:
+
+```typescript granular cascades
+@Entity()
+export class Post {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    // Full cascades — insert, update, remove, soft-remove, and recover
+    @ManyToMany(() => PostCategory, { cascade: true })
+    @JoinTable()
+    categories: PostCategory[]
+
+    // Only cascade inserts
+    @ManyToMany(() => PostDetails, (details) => details.posts, {
+        cascade: ["insert"],
+    })
+    @JoinTable()
+    details: PostDetails[]
+
+    // Only cascade updates
+    @ManyToMany(() => PostImage, (image) => image.posts, {
+        cascade: ["update"],
+    })
+    @JoinTable()
+    images: PostImage[]
+
+    // Cascade inserts and updates
+    @ManyToMany(() => PostInformation, (information) => information.posts, {
+        cascade: ["insert", "update"],
+    })
+    @JoinTable()
+    informations: PostInformation[]
+}
+```
+
+<Warning>
+  Cascades can introduce subtle bugs when unintended objects are modified. Prefer granular cascade arrays over `cascade: true` in production code.
+</Warning>
+
+## `@JoinColumn` options
+
+`@JoinColumn` marks the side of a relation that holds the foreign key column. It is required on `@OneToOne` and optional (but allowed) on `@ManyToOne`.
+
+By default, TypeORM names the foreign key column `propertyName + referencedColumnName` (e.g., `categoryId`). You can customize it:
+
+```typescript custom join column name
+@ManyToOne(() => Category)
+@JoinColumn({ name: "cat_id" })
+category: Category
+```
+
+You can also reference a non-primary column:
+
+```typescript reference non-primary column
+@ManyToOne(() => Category)
+@JoinColumn({ referencedColumnName: "name" })
+category: Category
+// creates a column named "categoryName"
+```
+
+For composite foreign keys, pass an array:
+
+```typescript composite foreign key
+@ManyToOne(() => Category)
+@JoinColumn([
+    { name: "category_id", referencedColumnName: "id" },
+    { name: "locale_id",   referencedColumnName: "locale_id" },
+])
+category: Category
+```
+
+## `@JoinTable` options
+
+`@JoinTable` is used exclusively with `@ManyToMany`. It must be placed on one (owning) side of the relation. TypeORM creates a junction table automatically.
+
+You can customize the junction table name and its column names:
+
+```typescript custom junction table
+@ManyToMany(() => Category)
+@JoinTable({
+    name: "question_categories",
+    joinColumn: {
+        name: "question",
+        referencedColumnName: "id",
+    },
+    inverseJoinColumn: {
+        name: "category",
+        referencedColumnName: "id",
+    },
+})
+categories: Category[]
+```
+
+For entities with composite primary keys, pass an array of column descriptors to `joinColumn` and `inverseJoinColumn`.
+
+## The `Relation<T>` wrapper
+
+In ESM projects, TypeScript's `emitDecoratorMetadata` saves the type of each property. When two entities import each other (circular dependency), this can break module loading at runtime.
+
+Wrap the relation type in `Relation<T>` to prevent TypeScript from emitting the type metadata for the property, which eliminates the circular import issue:
+
+```typescript ESM circular dependency fix
+import { Entity, PrimaryGeneratedColumn, OneToOne, JoinColumn } from "typeorm"
+import type { Profile } from "./Profile"
+import { Relation } from "typeorm"
+
+@Entity()
+export class User {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    @OneToOne(() => Profile, (profile) => profile.user)
+    @JoinColumn()
+    profile: Relation<Profile>
+}
+```
+
+`Relation<T>` is a transparent type alias (`type Relation<T> = T`), so it has no runtime cost and does not change TypeScript type checking.
+
+<Note>
+  Use `Relation<T>` any time two entities reference each other, especially in ESM / native ES module environments.
+</Note>

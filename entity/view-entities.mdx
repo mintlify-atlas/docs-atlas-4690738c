@@ -1,0 +1,285 @@
+---
+title: "View entities"
+description: "Map database views to TypeScript classes using @ViewEntity and @ViewColumn decorators."
+---
+
+## What is a view entity?
+
+A view entity is a class that maps to a database view. Mark a class with `@ViewEntity()` and each view column with `@ViewColumn()`. TypeORM manages view creation during migrations and schema sync.
+
+View entities are **read-only** — you can query them but not insert, update, or delete through them.
+
+## @ViewEntity options
+
+<ParamField path="expression" type="string | QueryBuilder" required>
+  The SQL expression that defines the view. Can be a raw SQL string or a `QueryBuilder` instance.
+</ParamField>
+
+<ParamField path="name" type="string">
+  View name in the database. Defaults to the lowercased class name.
+</ParamField>
+
+<ParamField path="database" type="string">
+  Database name on the selected server.
+</ParamField>
+
+<ParamField path="schema" type="string">
+  Schema name.
+</ParamField>
+
+<ParamField path="materialized" type="boolean">
+  When `true`, creates a materialized view. PostgreSQL only.
+</ParamField>
+
+<ParamField path="dependsOn" type="Entity[]">
+  List of other view entities this view depends on. TypeORM uses this to order migration steps correctly.
+</ParamField>
+
+## Defining a view entity
+
+Provide the view expression as a raw SQL string or as a `QueryBuilder` callback:
+
+<CodeGroup>
+
+```typescript Raw SQL
+import { ViewEntity, ViewColumn } from "typeorm"
+
+@ViewEntity({
+    expression: `
+        SELECT "post"."id"           AS "id",
+               "post"."name"         AS "name",
+               "category"."name"     AS "categoryName"
+        FROM "post" "post"
+        LEFT JOIN "category" "category" ON "post"."categoryId" = "category"."id"
+    `,
+})
+export class PostCategory {
+    @ViewColumn()
+    id: number
+
+    @ViewColumn()
+    name: string
+
+    @ViewColumn()
+    categoryName: string
+}
+```
+
+```typescript QueryBuilder
+import { ViewEntity, ViewColumn, DataSource } from "typeorm"
+import { Post } from "./Post"
+import { Category } from "./Category"
+
+@ViewEntity({
+    expression: (dataSource: DataSource) =>
+        dataSource
+            .createQueryBuilder()
+            .select("post.id", "id")
+            .addSelect("post.name", "name")
+            .addSelect("category.name", "categoryName")
+            .from(Post, "post")
+            .leftJoin(Category, "category", "category.id = post.categoryId"),
+})
+export class PostCategory {
+    @ViewColumn()
+    id: number
+
+    @ViewColumn()
+    name: string
+
+    @ViewColumn()
+    categoryName: string
+}
+```
+
+</CodeGroup>
+
+<Warning>
+  Parameter binding is not supported in view expressions due to driver limitations. Use literal values in `WHERE` clauses:
+
+  ```typescript
+  // Wrong — parameter binding will not work
+  .where("category.name = :name", { name: "Cars" })
+
+  // Correct — use a literal value
+  .where("category.name = 'Cars'")
+  ```
+</Warning>
+
+## Registering view entities
+
+Register view entities in your `DataSource` configuration alongside regular entities:
+
+```typescript app-data-source.ts
+import { DataSource } from "typeorm"
+import { PostCategory } from "./entities/PostCategory"
+
+const AppDataSource = new DataSource({
+    type: "mysql",
+    host: "localhost",
+    port: 3306,
+    username: "test",
+    password: "test",
+    database: "test",
+    entities: [PostCategory],
+})
+```
+
+## @ViewColumn options
+
+<ParamField path="name" type="string">
+  Column name in the database view. Defaults to the property name.
+</ParamField>
+
+<ParamField path="transformer" type="object">
+  A `{ from, to }` transformer for converting between database and entity types. Because views are read-only, `transformer.to` is never called.
+</ParamField>
+
+## Materialized views
+
+PostgreSQL supports materialized views — views whose results are stored on disk and refreshed explicitly. Set `materialized: true` in `@ViewEntity`:
+
+```typescript post-category.view.ts
+import { ViewEntity, ViewColumn, Index, DataSource } from "typeorm"
+import { Post } from "./Post"
+import { Category } from "./Category"
+
+@ViewEntity({
+    materialized: true,
+    expression: (dataSource: DataSource) =>
+        dataSource
+            .createQueryBuilder()
+            .select("post.id", "id")
+            .addSelect("post.name", "name")
+            .addSelect("category.name", "categoryName")
+            .from(Post, "post")
+            .leftJoin(Category, "category", "category.id = post.categoryId"),
+})
+export class PostCategory {
+    @ViewColumn()
+    id: number
+
+    @Index()
+    @ViewColumn()
+    name: string
+
+    @Index("catname-idx")
+    @ViewColumn()
+    categoryName: string
+}
+```
+
+<Note>
+  Only the `unique` option is supported for indices on materialized views. Other index options are ignored.
+
+  ```typescript
+  @Index("name-idx", { unique: true })
+  @ViewColumn()
+  name: string
+  ```
+</Note>
+
+## Complete example
+
+<Steps>
+  <Step title="Define the source entities">
+    ```typescript category.entity.ts
+    import { Entity, PrimaryGeneratedColumn, Column } from "typeorm"
+
+    @Entity()
+    export class Category {
+        @PrimaryGeneratedColumn()
+        id: number
+
+        @Column()
+        name: string
+    }
+    ```
+
+    ```typescript post.entity.ts
+    import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn } from "typeorm"
+    import { Category } from "./Category"
+
+    @Entity()
+    export class Post {
+        @PrimaryGeneratedColumn()
+        id: number
+
+        @Column()
+        name: string
+
+        @Column()
+        categoryId: number
+
+        @ManyToOne(() => Category)
+        @JoinColumn({ name: "categoryId" })
+        category: Category
+    }
+    ```
+  </Step>
+
+  <Step title="Define the view entity">
+    ```typescript post-category.view.ts
+    import { ViewEntity, ViewColumn, DataSource } from "typeorm"
+    import { Post } from "./Post"
+    import { Category } from "./Category"
+
+    @ViewEntity({
+        expression: (dataSource: DataSource) =>
+            dataSource
+                .createQueryBuilder()
+                .select("post.id", "id")
+                .addSelect("post.name", "name")
+                .addSelect("category.name", "categoryName")
+                .from(Post, "post")
+                .leftJoin(Category, "category", "category.id = post.categoryId"),
+    })
+    export class PostCategory {
+        @ViewColumn()
+        id: number
+
+        @ViewColumn()
+        name: string
+
+        @ViewColumn()
+        categoryName: string
+    }
+    ```
+  </Step>
+
+  <Step title="Insert data and query the view">
+    ```typescript
+    import { Category } from "./entities/Category"
+    import { Post } from "./entities/Post"
+    import { PostCategory } from "./entities/PostCategory"
+
+    const category1 = new Category()
+    category1.name = "Cars"
+    await dataSource.manager.save(category1)
+
+    const category2 = new Category()
+    category2.name = "Airplanes"
+    await dataSource.manager.save(category2)
+
+    const post1 = new Post()
+    post1.name = "About BMW"
+    post1.categoryId = category1.id
+    await dataSource.manager.save(post1)
+
+    const post2 = new Post()
+    post2.name = "About Boeing"
+    post2.categoryId = category2.id
+    await dataSource.manager.save(post2)
+
+    // Query the view
+    const all = await dataSource.manager.find(PostCategory)
+    // [
+    //   PostCategory { id: 1, name: 'About BMW', categoryName: 'Cars' },
+    //   PostCategory { id: 2, name: 'About Boeing', categoryName: 'Airplanes' }
+    // ]
+
+    const one = await dataSource.manager.findOneBy(PostCategory, { id: 1 })
+    // PostCategory { id: 1, name: 'About BMW', categoryName: 'Cars' }
+    ```
+  </Step>
+</Steps>

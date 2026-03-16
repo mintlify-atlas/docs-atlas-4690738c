@@ -1,0 +1,251 @@
+---
+title: "One-to-one relations"
+description: "Model exclusive pairings between entities with @OneToOne and @JoinColumn. Set up unidirectional or bidirectional relations and load them with find options or QueryBuilder."
+---
+
+A one-to-one relation is one where Entity A contains exactly one instance of Entity B, and Entity B contains exactly one instance of Entity A. A classic example is a `User` and their `Profile`: one user has one profile, and that profile belongs to exactly one user.
+
+## Basic setup
+
+Define the target entity first:
+
+```typescript profile.entity.ts
+import { Entity, PrimaryGeneratedColumn, Column } from "typeorm"
+
+@Entity()
+export class Profile {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    @Column()
+    gender: string
+
+    @Column()
+    photo: string
+}
+```
+
+Then add `@OneToOne` and `@JoinColumn` to the owning entity:
+
+```typescript user.entity.ts
+import {
+    Entity,
+    PrimaryGeneratedColumn,
+    Column,
+    OneToOne,
+    JoinColumn,
+} from "typeorm"
+import { Profile } from "./Profile"
+
+@Entity()
+export class User {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    @Column()
+    name: string
+
+    @OneToOne(() => Profile)
+    @JoinColumn()
+    profile: Profile
+}
+```
+
+`@JoinColumn` is required for `@OneToOne` and must be placed on exactly one side — the side whose table will hold the foreign key column. This produces the following schema:
+
+```
++-------------+--------------+----------------------------+
+|                        profile                          |
++-------------+--------------+----------------------------+
+| id          | int          | PRIMARY KEY AUTO_INCREMENT |
+| gender      | varchar(255) |                            |
+| photo       | varchar(255) |                            |
++-------------+--------------+----------------------------+
+
++-------------+--------------+----------------------------+
+|                          user                           |
++-------------+--------------+----------------------------+
+| id          | int          | PRIMARY KEY AUTO_INCREMENT |
+| name        | varchar(255) |                            |
+| profileId   | int          | FOREIGN KEY                |
++-------------+--------------+----------------------------+
+```
+
+## Saving the relation
+
+Save both entities explicitly, then assign the relation before saving the owner:
+
+```typescript
+const profile = new Profile()
+profile.gender = "male"
+profile.photo = "me.jpg"
+await dataSource.manager.save(profile)
+
+const user = new User()
+user.name = "Joe Smith"
+user.profile = profile
+await dataSource.manager.save(user)
+```
+
+With `cascade: true` on the relation you can collapse this into a single `save` call:
+
+```typescript with cascade
+import { OneToOne, JoinColumn } from "typeorm"
+
+@OneToOne(() => Profile, { cascade: true })
+@JoinColumn()
+profile: Profile
+```
+
+```typescript
+const profile = new Profile()
+profile.gender = "female"
+profile.photo = "avatar.png"
+
+const user = new User()
+user.name = "Jane Smith"
+user.profile = profile // profile is saved automatically
+await dataSource.manager.save(user)
+```
+
+## Loading the relation
+
+Relations are not loaded by default. Use `relations` in `FindOptions` or a `QueryBuilder` join:
+
+<CodeGroup>
+
+```typescript find options
+const users = await dataSource.getRepository(User).find({
+    relations: {
+        profile: true,
+    },
+})
+```
+
+```typescript QueryBuilder
+const users = await dataSource
+    .getRepository(User)
+    .createQueryBuilder("user")
+    .leftJoinAndSelect("user.profile", "profile")
+    .getMany()
+```
+
+</CodeGroup>
+
+<Note>
+  When `eager: true` is set on the relation, `find*` methods load it automatically. `QueryBuilder` always requires an explicit join regardless of the `eager` setting.
+</Note>
+
+## Bidirectional relations
+
+A unidirectional relation has a decorator on only one side. A bidirectional relation has decorators on both sides, which lets you join from either end.
+
+Add the inverse side to `Profile` and wire up both sides using the second argument of `@OneToOne`:
+
+<CodeGroup>
+
+```typescript profile.entity.ts
+import { Entity, PrimaryGeneratedColumn, Column, OneToOne } from "typeorm"
+import type { User } from "./User"
+import { Relation } from "typeorm"
+
+@Entity()
+export class Profile {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    @Column()
+    gender: string
+
+    @Column()
+    photo: string
+
+    @OneToOne(() => User, (user) => user.profile)
+    user: Relation<User>
+}
+```
+
+```typescript user.entity.ts
+import {
+    Entity,
+    PrimaryGeneratedColumn,
+    Column,
+    OneToOne,
+    JoinColumn,
+} from "typeorm"
+import { Profile } from "./Profile"
+import { Relation } from "typeorm"
+
+@Entity()
+export class User {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    @Column()
+    name: string
+
+    @OneToOne(() => Profile, (profile) => profile.user)
+    @JoinColumn()
+    profile: Relation<Profile>
+}
+```
+
+</CodeGroup>
+
+`@JoinColumn` stays on one side only — the side that holds the foreign key. The inverse side does not have `@JoinColumn`.
+
+With a bidirectional relation you can join from either entity:
+
+```typescript join from inverse side
+const profiles = await dataSource
+    .getRepository(Profile)
+    .createQueryBuilder("profile")
+    .leftJoinAndSelect("profile.user", "user")
+    .getMany()
+```
+
+## Self-referencing one-to-one
+
+An entity can hold a one-to-one relation to itself. This pattern is useful for linked-list nodes or chaining records:
+
+```typescript self-referencing
+import {
+    Entity,
+    PrimaryGeneratedColumn,
+    Column,
+    OneToOne,
+    JoinColumn,
+} from "typeorm"
+
+@Entity()
+export class Node {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    @Column()
+    label: string
+
+    @OneToOne(() => Node, (node) => node.previous)
+    @JoinColumn()
+    next: Node
+
+    @OneToOne(() => Node, (node) => node.next)
+    previous: Node
+}
+```
+
+## Cascade options
+
+You can restrict cascades to specific operations:
+
+```typescript
+@OneToOne(() => Profile, {
+    cascade: ["insert", "update"],  // only propagate insert and update
+    onDelete: "CASCADE",            // database-level delete cascade
+    nullable: false,                // require the relation
+})
+@JoinColumn()
+profile: Profile
+```
+
+See [Relations](/relations/relations#cascades) for the full list of cascade options.

@@ -1,0 +1,299 @@
+---
+title: "Tree entities"
+description: "Store and query hierarchical tree structures in your database using TypeORM's four supported tree patterns."
+---
+
+TypeORM provides built-in support for four tree storage patterns. Choose based on your read/write performance requirements and the depth of your data.
+
+<Columns cols={2}>
+  <Card title="Adjacency list" icon="list-tree">
+    Simple self-referencing model. Easy to set up, but loading deep trees requires many joins.
+  </Card>
+  <Card title="Nested set" icon="brackets-curly">
+    Very efficient for reads. Poor write performance. Does not support multiple roots.
+  </Card>
+  <Card title="Materialized path" icon="route">
+    Simple and effective. Good balance of read and write performance.
+  </Card>
+  <Card title="Closure table" icon="table">
+    Efficient for both reads and writes. Uses a separate table to store ancestor/descendant pairs.
+  </Card>
+</Columns>
+
+## Adjacency list
+
+The adjacency list pattern uses standard `@ManyToOne` / `@OneToMany` self-references. It is simple to implement, but loading an entire deep tree requires many joins.
+
+<Note>
+  `TreeRepository` does not support the adjacency list pattern. Use a regular `Repository` or `EntityManager` with explicit relation loading.
+</Note>
+
+```typescript category.entity.ts
+import {
+    Entity,
+    Column,
+    PrimaryGeneratedColumn,
+    ManyToOne,
+    OneToMany,
+} from "typeorm"
+
+@Entity()
+export class Category {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    @Column()
+    name: string
+
+    @ManyToOne(() => Category, (category) => category.children)
+    parent: Category
+
+    @OneToMany(() => Category, (category) => category.parent)
+    children: Category[]
+}
+```
+
+## Nested set
+
+The nested set pattern stores left and right boundary values for each node. It is the fastest pattern for reads (no joins needed to load descendants), but writes are expensive because inserting or moving a node updates many rows.
+
+```typescript category.entity.ts
+import {
+    Entity,
+    Tree,
+    Column,
+    PrimaryGeneratedColumn,
+    TreeChildren,
+    TreeParent,
+} from "typeorm"
+
+@Entity()
+@Tree("nested-set")
+export class Category {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    @Column()
+    name: string
+
+    @TreeChildren()
+    children: Category[]
+
+    @TreeParent()
+    parent: Category
+}
+```
+
+<Warning>
+  Nested set does not support multiple root nodes. All nodes must descend from a single root.
+</Warning>
+
+## Materialized path
+
+Materialized path (also called path enumeration) stores the full path from the root to each node as a string. It is simple, effective, and supports multiple roots.
+
+```typescript category.entity.ts
+import {
+    Entity,
+    Tree,
+    Column,
+    PrimaryGeneratedColumn,
+    TreeChildren,
+    TreeParent,
+} from "typeorm"
+
+@Entity()
+@Tree("materialized-path")
+export class Category {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    @Column()
+    name: string
+
+    @TreeChildren()
+    children: Category[]
+
+    @TreeParent()
+    parent: Category
+}
+```
+
+## Closure table
+
+The closure table pattern stores every ancestor/descendant pair in a separate table. It is efficient for both reads and writes.
+
+```typescript category.entity.ts
+import {
+    Entity,
+    Tree,
+    Column,
+    PrimaryGeneratedColumn,
+    TreeChildren,
+    TreeParent,
+} from "typeorm"
+
+@Entity()
+@Tree("closure-table")
+export class Category {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    @Column()
+    name: string
+
+    @TreeChildren()
+    children: Category[]
+
+    @TreeParent()
+    parent: Category
+}
+```
+
+Customize the generated closure table name and column names:
+
+```typescript
+@Tree("closure-table", {
+    closureTableName: "category_closure",
+    ancestorColumnName: (column) => "ancestor_" + column.propertyName,
+    descendantColumnName: (column) => "descendant_" + column.propertyName,
+})
+```
+
+## Saving tree entities
+
+Set the `parent` reference on child entities before saving:
+
+```typescript
+const a1 = new Category()
+a1.name = "a1"
+await dataSource.manager.save(a1)
+
+const a11 = new Category()
+a11.name = "a11"
+a11.parent = a1
+await dataSource.manager.save(a11)
+
+const a12 = new Category()
+a12.name = "a12"
+a12.parent = a1
+await dataSource.manager.save(a12)
+
+const a111 = new Category()
+a111.name = "a111"
+a111.parent = a11
+await dataSource.manager.save(a111)
+
+const a112 = new Category()
+a112.name = "a112"
+a112.parent = a11
+await dataSource.manager.save(a112)
+```
+
+## TreeRepository
+
+Obtain a `TreeRepository` through `dataSource.manager.getTreeRepository(Entity)` or `dataSource.getTreeRepository(Entity)`:
+
+```typescript
+const repository = dataSource.manager.getTreeRepository(Category)
+```
+
+`TreeRepository` extends the standard `Repository` and adds the following tree-specific methods.
+
+### findTrees
+
+Returns all root nodes with their full subtree loaded recursively:
+
+```typescript
+const trees = await repository.findTrees()
+// Returns:
+// [
+//   { id: 1, name: "a1", children: [
+//     { id: 2, name: "a11", children: [
+//       { id: 4, name: "a111" },
+//       { id: 5, name: "a112" }
+//     ]},
+//     { id: 3, name: "a12" }
+//   ]}
+// ]
+
+// Limit depth
+const shallowTrees = await repository.findTrees({ depth: 2 })
+```
+
+### findRoots
+
+Returns all root nodes (entities with no parent). Children are not loaded:
+
+```typescript
+const roots = await repository.findRoots()
+```
+
+### findDescendants and findDescendantsTree
+
+`findDescendants` returns all descendants in a flat array. `findDescendantsTree` returns them nested:
+
+```typescript
+// Flat array
+const descendants = await repository.findDescendants(parentCategory)
+
+// Nested tree
+const descendantsTree = await repository.findDescendantsTree(parentCategory)
+
+// Limit depth
+const descendantsTree = await repository.findDescendantsTree(parentCategory, { depth: 2 })
+
+// Count
+const count = await repository.countDescendants(parentCategory)
+```
+
+### findAncestors and findAncestorsTree
+
+`findAncestors` returns all ancestors in a flat array. `findAncestorsTree` returns them nested:
+
+```typescript
+// Flat array
+const ancestors = await repository.findAncestors(childCategory)
+
+// Nested tree
+const ancestorsTree = await repository.findAncestorsTree(childCategory)
+
+// Count
+const count = await repository.countAncestors(childCategory)
+```
+
+### Query builder methods
+
+For complex queries, build custom queries using the tree-aware query builders:
+
+```typescript
+// Descendants query builder
+const children = await repository
+    .createDescendantsQueryBuilder("category", "categoryClosure", parentCategory)
+    .andWhere("category.type = 'secondary'")
+    .getMany()
+
+// Ancestors query builder
+const parents = await repository
+    .createAncestorsQueryBuilder("category", "categoryClosure", childCategory)
+    .andWhere("category.type = 'primary'")
+    .getMany()
+```
+
+## Loading relations
+
+All `TreeRepository` query methods accept a `relations` option to automatically join related entities:
+
+```typescript
+// Load trees with a related "sites" entity joined
+const trees = await repository.findTrees({
+    relations: ["sites"],
+})
+
+// Load ancestors with a related "members" entity joined
+const ancestors = await repository.findAncestors(childCategory, {
+    relations: ["members"],
+})
+```
+
+The `relations` option is available on: `findTrees`, `findRoots`, `findDescendants`, `findDescendantsTree`, `findAncestors`, and `findAncestorsTree`.

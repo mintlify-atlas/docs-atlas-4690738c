@@ -1,0 +1,294 @@
+---
+title: Using the CLI
+description: Reference for all TypeORM CLI commands — init, entity:create, subscriber:create, migration commands, schema commands, cache:clear, query, and version — with all flags documented.
+---
+
+The TypeORM CLI lets you scaffold projects, generate migrations, sync schemas, and run queries directly from your terminal.
+
+## Installation
+
+<Tabs>
+  <Tab title="Global install">
+    ```shell
+    npm install -g typeorm
+    ```
+
+    Run commands as:
+
+    ```shell
+    typeorm <command>
+    ```
+  </Tab>
+  <Tab title="npx (no install)">
+    ```shell
+    npx typeorm <command>
+    ```
+  </Tab>
+  <Tab title="Local (TypeScript projects)">
+    Install `ts-node` as a dev dependency:
+
+    ```shell
+    npm install ts-node --save-dev
+    ```
+
+    Add a script to `package.json`:
+
+    <CodeGroup>
+
+    ```json CommonJS
+    {
+        "scripts": {
+            "typeorm": "typeorm-ts-node-commonjs"
+        }
+    }
+    ```
+
+    ```json ESM
+    {
+        "scripts": {
+            "typeorm": "typeorm-ts-node-esm"
+        }
+    }
+    ```
+
+    </CodeGroup>
+
+    Then run:
+
+    ```shell
+    npm run typeorm migration:run -- -d path/to/data-source.ts
+    ```
+  </Tab>
+</Tabs>
+
+<Note>
+The examples below use a globally installed `typeorm`. Replace `typeorm` with `npx typeorm` or `npm run typeorm` depending on your setup.
+</Note>
+
+---
+
+## `init`
+
+Scaffolds a new TypeORM project with all required files.
+
+```shell
+typeorm init
+```
+
+Generated files:
+
+- `.gitignore`
+- `package.json`
+- `README.md`
+- `tsconfig.json`
+- `src/entities/User.ts`
+- `src/data-source.ts`
+- `src/index.ts`
+- `src/migrations/` (empty directory)
+
+| Flag | Description |
+|---|---|
+| `--name`, `-n` | Project directory name. Files are created inside this directory. |
+| `--database`, `--db` | Database driver to configure. Choices: `postgres`, `mysql`, `mariadb`, `better-sqlite3`, `mssql`, `oracle`, `mongodb`, `cockroachdb`, `spanner`. |
+| `--express` | Include Express server boilerplate. |
+| `--docker` | Generate a `docker-compose.yml` file for the selected database. |
+| `--module`, `--ms` | Module system: `commonjs` (default) or `esm`. |
+| `--manager`, `--pm` | Package manager: `npm` (default) or `yarn`. |
+
+```shell
+# Create a project called "my-api" using PostgreSQL with Docker and ESM
+typeorm init --name my-api --database postgres --docker --module esm
+```
+
+---
+
+## `entity:create`
+
+Generates an empty entity file.
+
+```shell
+typeorm entity:create src/entities/Product
+```
+
+| Argument | Description |
+|---|---|
+| `path` (required) | Path (without `.ts` extension) where the entity file will be created. |
+
+---
+
+## `subscriber:create`
+
+Generates an empty subscriber file.
+
+```shell
+typeorm subscriber:create src/subscribers/PostSubscriber
+```
+
+| Argument | Description |
+|---|---|
+| `path` (required) | Path (without `.ts` extension) where the subscriber file will be created. |
+
+---
+
+## Migration commands
+
+### `migration:create`
+
+Creates an empty migration file with `up` and `down` methods.
+
+```shell
+typeorm migration:create src/migrations/AddUserTable
+```
+
+| Argument / Flag | Description |
+|---|---|
+| `path` (required) | Path for the migration file (timestamp is prepended automatically). |
+| `--outputJs`, `-o` | Generate a JavaScript file instead of TypeScript. |
+| `--esm` | Use ESM `export` syntax instead of CommonJS `module.exports`. |
+| `--timestamp`, `-t` | Override the timestamp prepended to the file name. |
+
+### `migration:generate`
+
+Compares your entity definitions against the current database schema and generates a migration containing the SQL needed to bring the database up to date.
+
+```shell
+typeorm migration:generate src/migrations/AddUserTable -d src/data-source.ts
+```
+
+| Argument / Flag | Description |
+|---|---|
+| `path` (required) | Path for the generated migration file. |
+| `--dataSource`, `-d` (required) | Path to the file that exports your `DataSource` instance. |
+| `--pretty`, `-p` | Pretty-print the generated SQL. |
+| `--outputJs`, `-o` | Generate a JavaScript file instead of TypeScript. |
+| `--esm` | Use ESM `export` syntax. |
+| `--dryrun`, `--dr` | Print the migration content without writing a file. |
+| `--check`, `--ch` | Exit with code 1 if any schema changes are detected (CI mode). |
+| `--timestamp`, `-t` | Override the timestamp prepended to the file name. |
+
+### `migration:run`
+
+Executes all pending migrations in order.
+
+```shell
+typeorm migration:run -d src/data-source.ts
+```
+
+| Flag | Description |
+|---|---|
+| `--dataSource`, `-d` (required) | Path to the file that exports your `DataSource` instance. |
+| `--transaction`, `-t` | Transaction mode: `all` (wrap all migrations in one transaction), `none` (no transaction), `each` (each migration in its own transaction). Defaults to the value in `migrationsTransactionMode`. |
+| `--fake`, `-f` | Mark migrations as executed without running them. Useful when the schema has already been changed manually. |
+
+### `migration:revert`
+
+Reverts the most recently executed migration by calling its `down` method.
+
+```shell
+typeorm migration:revert -d src/data-source.ts
+```
+
+| Flag | Description |
+|---|---|
+| `--dataSource`, `-d` (required) | Path to the file that exports your `DataSource` instance. |
+| `--transaction`, `-t` | Transaction mode: same values as `migration:run`. |
+| `--fake`, `-f` | Mark the migration as reverted without running `down`. |
+
+### `migration:show`
+
+Lists all migrations and whether each has been executed.
+
+```shell
+typeorm migration:show -d src/data-source.ts
+```
+
+| Flag | Description |
+|---|---|
+| `--dataSource`, `-d` (required) | Path to the file that exports your `DataSource` instance. |
+
+---
+
+## Schema commands
+
+### `schema:sync`
+
+Synchronizes your entity definitions with the database schema by running the necessary `ALTER TABLE` and `CREATE TABLE` statements.
+
+```shell
+typeorm schema:sync -d src/data-source.ts
+```
+
+<Warning>
+Running `schema:sync` in production can cause data loss. Use `schema:log` first to review the SQL that will be executed.
+</Warning>
+
+| Flag | Description |
+|---|---|
+| `--dataSource`, `-d` (required) | Path to the file that exports your `DataSource` instance. |
+
+### `schema:log`
+
+Prints the SQL queries that `schema:sync` would execute, without actually running them.
+
+```shell
+typeorm schema:log -d src/data-source.ts
+```
+
+| Flag | Description |
+|---|---|
+| `--dataSource`, `-d` (required) | Path to the file that exports your `DataSource` instance. |
+
+### `schema:drop`
+
+Drops all tables in the database. **Irreversible.**
+
+```shell
+typeorm schema:drop -d src/data-source.ts
+```
+
+<Warning>
+This removes all data in the database. Do not run in production unless you are certain.
+</Warning>
+
+| Flag | Description |
+|---|---|
+| `--dataSource`, `-d` (required) | Path to the file that exports your `DataSource` instance. |
+
+---
+
+## `query`
+
+Executes a raw SQL query against the database and prints the result.
+
+```shell
+typeorm query "SELECT * FROM users" -d src/data-source.ts
+```
+
+| Argument / Flag | Description |
+|---|---|
+| `query` | The SQL query string to execute. |
+| `--dataSource`, `-d` (required) | Path to the file that exports your `DataSource` instance. |
+
+---
+
+## `cache:clear`
+
+Clears all entries stored in the query result cache. Requires caching to be enabled in your DataSource options.
+
+```shell
+typeorm cache:clear -d src/data-source.ts
+```
+
+| Flag | Description |
+|---|---|
+| `--dataSource`, `-d` (required) | Path to the file that exports your `DataSource` instance. |
+
+---
+
+## `version`
+
+Prints the installed TypeORM version (both local and global).
+
+```shell
+typeorm version
+```

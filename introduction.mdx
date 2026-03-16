@@ -1,0 +1,136 @@
+---
+title: "TypeORM"
+description: "TypeScript & JavaScript ORM for Node.js — supports PostgreSQL, MySQL, MariaDB, SQLite, SQL Server, Oracle, MongoDB, and more."
+---
+
+<CardGroup cols={2}>
+  <Card title="Getting Started" icon="rocket" href="/getting-started">
+    Install TypeORM and connect to your database in minutes
+  </Card>
+  <Card title="Quickstart" icon="bolt" href="/quickstart">
+    Scaffold a new project with the TypeORM CLI
+  </Card>
+  <Card title="Entities" icon="table" href="/entity/entities">
+    Define your database schema using TypeScript decorators
+  </Card>
+  <Card title="Query Builder" icon="magnifying-glass" href="/query-builder/select-query-builder">
+    Write complex SQL queries with a fluent TypeScript API
+  </Card>
+</CardGroup>
+
+## What is TypeORM?
+
+TypeORM is an [ORM](https://en.wikipedia.org/wiki/Object-relational_mapping) that runs in Node.js, the browser, Cordova, Ionic, React Native, NativeScript, Expo, and Electron. It works with TypeScript and JavaScript (ES2021+) and supports both the **Active Record** and **Data Mapper** patterns.
+
+TypeORM supports more databases than any other JavaScript/TypeScript ORM:
+
+<CardGroup cols={3}>
+  <Card title="PostgreSQL" icon="database" href="/drivers/postgres">
+    Full-featured SQL database with JSON support
+  </Card>
+  <Card title="MySQL / MariaDB" icon="database" href="/drivers/mysql">
+    World's most popular open-source database
+  </Card>
+  <Card title="SQLite" icon="database" href="/drivers/sqlite">
+    Lightweight embedded database
+  </Card>
+  <Card title="SQL Server" icon="database" href="/drivers/microsoft-sqlserver">
+    Microsoft's enterprise database
+  </Card>
+  <Card title="MongoDB" icon="database" href="/drivers/mongodb">
+    NoSQL document database
+  </Card>
+  <Card title="Oracle" icon="database" href="/drivers/oracle">
+    Enterprise-grade Oracle database
+  </Card>
+  <Card title="SAP HANA" icon="database" href="/drivers/sap">
+    In-memory SAP database platform
+  </Card>
+  <Card title="Google Spanner" icon="database" href="/drivers/google-spanner">
+    Globally distributed relational database
+  </Card>
+</CardGroup>
+
+## Key features
+
+- **Active Record and Data Mapper** — choose the pattern that fits your architecture
+- **TypeScript-first** — full type safety with decorator-based entity definitions
+- **Powerful QueryBuilder** — build any SQL query with a fluent, chainable API
+- **Automatic migrations** — generate and run schema migrations from your entity changes
+- **Relations** — OneToOne, OneToMany, ManyToOne, ManyToMany with eager/lazy loading
+- **Lifecycle hooks** — BeforeInsert, AfterLoad, and more for entity event handling
+- **Query caching** — built-in caching with Redis and other providers
+- **CLI** — scaffold projects, generate migrations, sync schemas from the command line
+
+## Quick example
+
+Define your entity with TypeScript decorators:
+
+```typescript
+import { Entity, PrimaryGeneratedColumn, Column } from "typeorm"
+
+@Entity()
+export class User {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    @Column()
+    firstName: string
+
+    @Column()
+    lastName: string
+
+    @Column({ default: true })
+    isActive: boolean
+}
+```
+
+Then query it with the Repository API:
+
+```typescript
+const userRepository = AppDataSource.getRepository(User)
+
+// Save a user
+const user = userRepository.create({ firstName: "Alice", lastName: "Smith" })
+await userRepository.save(user)
+
+// Find users
+const users = await userRepository.find({ where: { isActive: true } })
+
+// Update a user
+await userRepository.update(1, { firstName: "Bob" })
+
+// Remove a user
+await userRepository.delete(1)
+```
+
+Or use the fluent QueryBuilder for complex queries:
+
+```typescript
+const users = await AppDataSource
+    .getRepository(User)
+    .createQueryBuilder("user")
+    .where("user.isActive = :isActive", { isActive: true })
+    .orderBy("user.lastName", "ASC")
+    .getMany()
+```
+
+## Installation
+
+<CodeGroup>
+```bash npm
+npm install typeorm reflect-metadata
+```
+```bash yarn
+yarn add typeorm reflect-metadata
+```
+```bash pnpm
+pnpm add typeorm reflect-metadata
+```
+</CodeGroup>
+
+Then install the driver for your database — see [Getting Started](/getting-started) for driver-specific instructions.
+
+<Tip>
+  TypeORM requires `reflect-metadata` to be imported once in your application's entry point before any entities are loaded.
+</Tip>

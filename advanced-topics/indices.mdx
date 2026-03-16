@@ -1,0 +1,190 @@
+---
+title: Indices
+description: Create single-column, composite, unique, spatial, and custom indices in TypeORM using the @Index decorator, with options for naming, synchronization control, and concurrent creation.
+---
+
+Indices speed up query performance by allowing the database to locate rows without a full table scan. TypeORM manages indices through the `@Index` decorator on entity classes and their properties.
+
+## Column indices
+
+Apply `@Index` to any column to create a standard index on that column:
+
+```typescript
+import { Entity, PrimaryGeneratedColumn, Column, Index } from "typeorm"
+
+@Entity()
+export class User {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    @Index()
+    @Column()
+    firstName: string
+
+    @Column()
+    @Index()
+    lastName: string
+}
+```
+
+### Named indices
+
+Provide a string to set an explicit index name:
+
+```typescript
+@Index("idx_user_first_name")
+@Column()
+firstName: string
+```
+
+## Unique indices
+
+Pass `{ unique: true }` to create a unique index:
+
+```typescript
+import { Entity, PrimaryGeneratedColumn, Column, Index } from "typeorm"
+
+@Entity()
+export class User {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    @Index({ unique: true })
+    @Column()
+    email: string
+}
+```
+
+<Note>
+CockroachDB stores unique indices as `UNIQUE` constraints rather than separate index objects.
+</Note>
+
+## Composite indices
+
+To index multiple columns together, place `@Index` on the entity class itself and list the column property names:
+
+```typescript
+import { Entity, PrimaryGeneratedColumn, Column, Index } from "typeorm"
+
+@Entity()
+@Index(["firstName", "lastName"])
+@Index(["firstName", "middleName", "lastName"], { unique: true })
+export class User {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    @Column()
+    firstName: string
+
+    @Column()
+    middleName: string
+
+    @Column()
+    lastName: string
+}
+```
+
+## Spatial indices
+
+MySQL, CockroachDB, and PostgreSQL (with PostGIS) support spatial indices.
+
+<Tabs>
+  <Tab title="MySQL">
+    Use a spatial column type and set `spatial: true`:
+
+    ```typescript
+    @Entity()
+    export class Thing {
+        @Column("point")
+        @Index({ spatial: true })
+        point: string
+    }
+    ```
+
+    Supported spatial types: `geometry`, `point`, `linestring`, `polygon`, `multipoint`, `multilinestring`, `multipolygon`, `geometrycollection`.
+  </Tab>
+  <Tab title="PostgreSQL (PostGIS)">
+    ```typescript
+    export interface Geometry {
+        type: "Point"
+        coordinates: [Number, Number]
+    }
+
+    @Entity()
+    export class Thing {
+        @Column("geometry", {
+            spatialFeatureType: "Point",
+            srid: 4326,
+        })
+        @Index({ spatial: true })
+        point: Geometry
+    }
+    ```
+
+    Supported spatial types: `geometry`, `geography`.
+  </Tab>
+</Tabs>
+
+## Index type
+
+Specify a custom index type using the `type` property. This is currently supported only for PostgreSQL:
+
+```typescript
+@Index({ type: "hash" })
+@Column()
+email: string
+```
+
+<Note>
+When `spatial: true` is set, the `type` field is ignored.
+</Note>
+
+## Concurrent index creation (PostgreSQL)
+
+Creating and dropping indices in PostgreSQL normally acquires an `ACCESS EXCLUSIVE` lock. To avoid this, use the `concurrent` option:
+
+```typescript
+@Entity()
+@Index(["firstName", "middleName", "lastName"], { concurrent: true })
+export class User {
+    // ...
+}
+```
+
+<Warning>
+Concurrent index creation requires `migrationsTransactionMode: "none"` in your DataSource options, because `CREATE INDEX CONCURRENTLY` cannot run inside a transaction.
+</Warning>
+
+## Disabling synchronization
+
+TypeORM cannot introspect or synchronize all possible index definitions — for example, functional indices using `lower()` or `pg_trgm`. Create these manually in migrations and then prevent TypeORM from deleting them by setting `synchronize: false`:
+
+```sql
+-- Create the index manually in a migration
+CREATE INDEX "POST_NAME_INDEX" ON "post" (lower("name"));
+```
+
+```typescript
+@Entity()
+@Index("POST_NAME_INDEX", { synchronize: false })
+export class Post {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    @Column()
+    name: string
+}
+```
+
+With `synchronize: false`, TypeORM acknowledges the index exists but will never attempt to create, alter, or drop it during schema sync.
+
+## Index option reference
+
+| Option | Type | Description |
+|---|---|---|
+| `name` | `string` | Explicit name for the index. |
+| `unique` | `boolean` | Creates a unique index. |
+| `spatial` | `boolean` | Creates a spatial index (MySQL, CockroachDB, PostGIS). |
+| `concurrent` | `boolean` | Uses `CONCURRENTLY` modifier in PostgreSQL. |
+| `type` | `string` | Custom index type, e.g. `"hash"` (PostgreSQL only). |
+| `synchronize` | `boolean` | Set to `false` to exclude this index from schema sync. |

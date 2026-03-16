@@ -1,0 +1,237 @@
+---
+title: "Data Source Options"
+description: "All configuration options available when creating a TypeORM DataSource, including connection, pool, cache, and behavior settings."
+---
+
+`DataSourceOptions` is the configuration object you pass to `new DataSource(...)`. The available options depend on the database `type`, but all drivers share a common set of options defined in `BaseDataSourceOptions`.
+
+## Example
+
+```typescript app-data-source.ts
+import { DataSource } from "typeorm"
+
+export const AppDataSource = new DataSource({
+    type: "postgres",
+    host: "localhost",
+    port: 5432,
+    username: "test",
+    password: "test",
+    database: "test",
+    logging: true,
+    synchronize: false,
+    entities: [__dirname + "/entities/**/*{.js,.ts}"],
+    migrations: [__dirname + "/migrations/**/*{.js,.ts}"],
+    subscribers: [__dirname + "/subscribers/**/*{.js,.ts}"],
+})
+```
+
+## Common options
+
+<ParamField path="type" type="string" required>
+  The database engine to use. Must be one of: `"mysql"`, `"postgres"`,
+  `"cockroachdb"`, `"sap"`, `"spanner"`, `"mariadb"`, `"cordova"`,
+  `"react-native"`, `"nativescript"`, `"sqljs"`, `"oracle"`, `"mssql"`,
+  `"mongodb"`, `"aurora-mysql"`, `"aurora-postgres"`, `"expo"`,
+  `"better-sqlite3"`, `"capacitor"`.
+</ParamField>
+
+<ParamField path="entities" type="Array<Function | string | EntitySchema>">
+  Entity classes, EntitySchema instances, or directory glob patterns from which
+  to load entities. Example: `[User, "entities/**/*.js",
+  "modules/**/entities/*.js"]`.
+</ParamField>
+
+<ParamField path="subscribers" type="Array<Function | string>">
+  Subscriber classes or directory glob patterns from which to load subscribers.
+  Example: `[PostSubscriber, "subscribers/**/*.js"]`.
+</ParamField>
+
+<ParamField path="migrations" type="Array<Function | string>">
+  Migration classes or glob patterns pointing to migration files. Example:
+  `["migrations/**/*.js"]`.
+</ParamField>
+
+<ParamField path="logging" type="boolean | string[]" default="false">
+  Enables query and error logging when `true`. You can also specify an array of
+  log categories: `["query", "error", "schema", "warn", "info", "log"]`.
+</ParamField>
+
+<ParamField
+  path="logger"
+  type="string | Logger"
+  default="'advanced-console'"
+>
+  Logger implementation to use. Built-in values: `"advanced-console"`,
+  `"simple-console"`, `"formatted-console"`, `"file"`, `"debug"`. You can also
+  provide a class implementing the `Logger` interface.
+</ParamField>
+
+<ParamField path="maxQueryExecutionTime" type="number">
+  When a query exceeds this time (in milliseconds), the logger emits a warning.
+  With MySQL, also sets the query timeout when `enableQueryTimeout` is `true`.
+</ParamField>
+
+<ParamField path="poolSize" type="number">
+  Maximum number of active connections the pool may contain.
+</ParamField>
+
+<ParamField path="namingStrategy" type="NamingStrategyInterface">
+  Custom naming strategy for generating table and column names. Implement the
+  `NamingStrategyInterface` to override defaults.
+</ParamField>
+
+<ParamField path="entityPrefix" type="string">
+  String to prepend to every table (or collection) name in this data source.
+</ParamField>
+
+<ParamField path="entitySkipConstructor" type="boolean" default="false">
+  When `true`, TypeORM does not call entity constructors when hydrating entities
+  from the database. Private properties and default property values may not
+  behave as expected when this is enabled.
+</ParamField>
+
+<ParamField path="relationLoadStrategy" type="'join' | 'query'" default="'join'">
+  Controls how relations are loaded globally. Use `"query"` when deeply nested
+  joins produce too much data. Can be overridden per-query in FindOptions and
+  QueryBuilder.
+</ParamField>
+
+<ParamField path="typename" type="string">
+  When set, each hydrated entity gains this property populated with the entity
+  name. Works like a discriminator property.
+</ParamField>
+
+<ParamField path="extra" type="object">
+  Extra options passed directly to the underlying database driver. Use for
+  driver-specific settings that TypeORM does not expose directly.
+</ParamField>
+
+## Schema management options
+
+<Warning>
+  Never enable `synchronize` or `dropSchema` in production. Both can result in
+  irreversible data loss.
+</Warning>
+
+<ParamField path="synchronize" type="boolean" default="false">
+  Automatically syncs the database schema on every application launch. Useful
+  during development. Use the CLI command `schema:sync` as an alternative.
+</ParamField>
+
+<ParamField path="dropSchema" type="boolean" default="false">
+  Drops the entire schema every time the data source is initialized. Use only
+  in development or testing environments.
+</ParamField>
+
+<ParamField path="migrationsRun" type="boolean" default="false">
+  Automatically runs pending migrations on every application launch.
+</ParamField>
+
+<ParamField path="migrationsTableName" type="string" default="'migrations'">
+  Name of the table used to track which migrations have been executed.
+</ParamField>
+
+<ParamField
+  path="migrationsTransactionMode"
+  type="'all' | 'none' | 'each'"
+  default="'all'"
+>
+  Transaction strategy when running migrations. `"all"` wraps all migrations in
+  a single transaction; `"each"` wraps each migration individually; `"none"`
+  runs without transactions.
+</ParamField>
+
+<ParamField path="metadataTableName" type="string" default="'typeorm_metadata'">
+  Name of the table used to store TypeORM's internal metadata (views, generated
+  columns, etc.).
+</ParamField>
+
+## Behavior options
+
+<ParamField path="isolateWhereStatements" type="boolean" default="false">
+  When `true`, each `WHERE` clause is automatically wrapped in parentheses.
+  Useful when combining multiple `.where()` calls to prevent unexpected
+  precedence issues.
+
+  ```typescript
+  // Without isolateWhereStatements:
+  // WHERE user.firstName = ? OR user.lastName = ?
+
+  // With isolateWhereStatements:
+  // WHERE (user.firstName = ? OR user.lastName = ?)
+  ```
+</ParamField>
+
+<ParamField path="invalidWhereValuesBehavior" type="object">
+  Controls how `null` and `undefined` values are handled in `WHERE` conditions
+  for high-level operations (`find`, `update`, `delete`, and EntityManager
+  methods). Does **not** affect QueryBuilder's `.where()` directly.
+
+  ```typescript
+  invalidWhereValuesBehavior: {
+      null: "ignore" | "sql-null" | "throw",     // default: "throw"
+      undefined: "ignore" | "throw",              // default: "throw"
+  }
+  ```
+
+  See [Null and Undefined Handling](/data-source/null-and-undefined-handling)
+  for full details.
+</ParamField>
+
+## Cache options
+
+Enable result caching by setting `cache: true` or by providing a configuration object:
+
+```typescript
+const AppDataSource = new DataSource({
+    type: "postgres",
+    // ... connection options
+    cache: {
+        type: "redis",
+        options: {
+            socket: { host: "localhost", port: 6379 },
+        },
+        duration: 30000, // 30 seconds
+    },
+})
+```
+
+<ParamField path="cache" type="boolean | object">
+  Enables query result caching. Set to `true` to use the default database
+  cache, or provide a configuration object.
+
+  <Expandable title="Cache configuration properties">
+    <ParamField path="cache.type" type="string" default="'database'">
+      Cache backend: `"database"` (stores in a DB table), `"redis"`,
+      `"ioredis"`, or `"ioredis/cluster"`.
+    </ParamField>
+
+    <ParamField path="cache.tableName" type="string" default="'query-result-cache'">
+      Table name for the `"database"` cache type.
+    </ParamField>
+
+    <ParamField path="cache.options" type="any">
+      Driver-specific options passed to the cache provider (e.g., Redis
+      connection options).
+    </ParamField>
+
+    <ParamField path="cache.alwaysEnabled" type="boolean" default="false">
+      When `true`, all queries using `find` methods and QueryBuilder are
+      automatically cached without requiring `.cache()` per query.
+    </ParamField>
+
+    <ParamField path="cache.duration" type="number" default="1000">
+      Default cache TTL in milliseconds. Can be overridden per query.
+    </ParamField>
+
+    <ParamField path="cache.ignoreErrors" type="boolean" default="false">
+      When `true`, cache errors are silently ignored and the query falls
+      through to the database.
+    </ParamField>
+
+    <ParamField path="cache.provider" type="(dataSource: DataSource) => QueryResultCache">
+      Factory function for a custom cache provider that implements the
+      `QueryResultCache` interface.
+    </ParamField>
+  </Expandable>
+</ParamField>

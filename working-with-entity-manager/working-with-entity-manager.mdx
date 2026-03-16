@@ -1,0 +1,264 @@
+---
+title: "Working with EntityManager"
+description: "Use EntityManager to insert, update, delete, and query any entity from a single access point backed by your DataSource."
+---
+
+## What is EntityManager?
+
+`EntityManager` is a unified interface for interacting with all of your entities. Rather than working with individual repositories for each entity type, `EntityManager` exposes every persistence operation in one place and automatically resolves the correct repository internally.
+
+You can think of `EntityManager` as a collection of all entity repositories bound to a single database connection (or query runner).
+
+## Accessing EntityManager
+
+Every initialized `DataSource` exposes its `EntityManager` through the `manager` property:
+
+```typescript app-data-source.ts
+import { DataSource } from "typeorm"
+import { User } from "./entity/User"
+
+export const AppDataSource = new DataSource({
+    type: "postgres",
+    host: "localhost",
+    port: 5432,
+    username: "user",
+    password: "password",
+    database: "mydb",
+    entities: [User],
+    synchronize: true,
+})
+```
+
+```typescript index.ts
+import { AppDataSource } from "./app-data-source"
+import { User } from "./entity/User"
+
+await AppDataSource.initialize()
+
+// Access the global EntityManager
+const manager = AppDataSource.manager
+```
+
+<Note>
+  The `DataSource.manager` property is a global `EntityManager` instance. For transactional work, always use the scoped manager provided inside `manager.transaction()`.
+</Note>
+
+## Basic CRUD operations
+
+<Steps>
+  <Step title="Find a single entity">
+    Use `findOneBy` to retrieve the first entity matching a set of conditions:
+
+    ```typescript
+    const user = await AppDataSource.manager.findOneBy(User, { id: 1 })
+    ```
+
+    Use `findOne` when you need to load relations, apply ordering, or use locking:
+
+    ```typescript
+    const user = await AppDataSource.manager.findOne(User, {
+        where: { email: "timber@example.com" },
+        relations: { profile: true },
+    })
+    ```
+  </Step>
+
+  <Step title="Find multiple entities">
+    ```typescript
+    const users = await AppDataSource.manager.find(User, {
+        where: { isActive: true },
+        order: { createdAt: "DESC" },
+        take: 20,
+    })
+    ```
+  </Step>
+
+  <Step title="Create and save an entity">
+    Instantiate with `create` to ensure TypeORM applies any default values and transformers, then call `save`:
+
+    ```typescript
+    const user = AppDataSource.manager.create(User, {
+        firstName: "Timber",
+        lastName: "Saw",
+        email: "timber@example.com",
+    })
+
+    const savedUser = await AppDataSource.manager.save(user)
+    // savedUser.id is now populated
+    ```
+
+    `save` upserts: if the entity already has a primary key that exists in the database, it runs an `UPDATE`; otherwise it runs an `INSERT`.
+  </Step>
+
+  <Step title="Update an entity">
+    Load the entity, modify its properties, then save it:
+
+    ```typescript
+    const user = await AppDataSource.manager.findOneBy(User, { id: 1 })
+    user.name = "Umed"
+    await AppDataSource.manager.save(user)
+    ```
+
+    For targeted column updates without loading the entity first, use `update`:
+
+    ```typescript
+    await AppDataSource.manager.update(User, 1, { firstName: "Umed" })
+    ```
+  </Step>
+
+  <Step title="Delete an entity">
+    Remove by primary key:
+
+    ```typescript
+    await AppDataSource.manager.delete(User, 1)
+    await AppDataSource.manager.delete(User, [1, 2, 3])
+    await AppDataSource.manager.delete(User, { firstName: "Timber" })
+    ```
+
+    Or remove an entity instance (fires lifecycle hooks):
+
+    ```typescript
+    const user = await AppDataSource.manager.findOneBy(User, { id: 1 })
+    await AppDataSource.manager.remove(user)
+    ```
+  </Step>
+</Steps>
+
+## Inserting records
+
+`insert` bypasses the save/update logic and always performs an `INSERT`. Use it for bulk inserts or when you know the record does not yet exist:
+
+```typescript
+await AppDataSource.manager.insert(User, {
+    firstName: "Timber",
+    lastName: "Saw",
+})
+
+await AppDataSource.manager.insert(User, [
+    { firstName: "Foo", lastName: "Bar" },
+    { firstName: "Rizz", lastName: "Rak" },
+])
+```
+
+## Working within a transaction
+
+Wrap multiple operations in `transaction` to ensure they all succeed or all roll back:
+
+```typescript
+await AppDataSource.manager.transaction(async (transactionalManager) => {
+    const user = transactionalManager.create(User, {
+        firstName: "Timber",
+        lastName: "Saw",
+    })
+    await transactionalManager.save(user)
+
+    const profile = transactionalManager.create(Profile, {
+        bio: "TypeORM fan",
+        user,
+    })
+    await transactionalManager.save(profile)
+})
+```
+
+<Warning>
+  Inside a transaction callback, you **must** use the `transactionalManager` argument for every database operation. Using `AppDataSource.manager` or a repository obtained outside the transaction will bypass the transaction.
+</Warning>
+
+You can also specify a transaction isolation level:
+
+```typescript
+await AppDataSource.manager.transaction(
+    "SERIALIZABLE",
+    async (transactionalManager) => {
+        // all queries here run at SERIALIZABLE isolation
+    },
+)
+```
+
+## Getting a repository from EntityManager
+
+When you want to scope operations to a single entity type, get a repository from the manager. This is equivalent to calling `DataSource.getRepository()` but respects any active transaction:
+
+```typescript
+const userRepository = AppDataSource.manager.getRepository(User)
+
+const user = await userRepository.findOneBy({ id: 1 })
+user.firstName = "Umed"
+await userRepository.save(user)
+```
+
+<Tip>
+  When you only need to work with one entity type and don't need transactions, use `DataSource.getRepository()` directly. See [Working with Repository](/working-with-entity-manager/working-with-repository) for details.
+</Tip>
+
+## Soft deletes and restoration
+
+Entities decorated with `@DeleteDateColumn` support soft deletion. The row is retained in the database with a deletion timestamp set instead of being physically removed:
+
+```typescript
+// Soft-delete a user (sets deletedAt timestamp)
+await AppDataSource.manager.softDelete(User, 1)
+
+// Restore a soft-deleted user
+await AppDataSource.manager.restore(User, 1)
+
+// Include soft-deleted entities in a query
+const allUsers = await AppDataSource.manager.find(User, {
+    withDeleted: true,
+})
+```
+
+## Counting and checking existence
+
+```typescript
+// Count matching entities
+const count = await AppDataSource.manager.countBy(User, { isActive: true })
+
+// Check whether any entity matches
+const exists = await AppDataSource.manager.existsBy(User, {
+    email: "timber@example.com",
+})
+```
+
+## Raw SQL queries
+
+For queries that can't be expressed through the standard API, use `query` or the tagged template `sql`:
+
+<CodeGroup>
+
+```typescript query()
+const rawData = await AppDataSource.manager.query(
+    "SELECT * FROM users WHERE age > $1",
+    [18],
+)
+```
+
+```typescript sql tag
+const age = 18
+const rawData = await AppDataSource.manager.sql`
+    SELECT * FROM users WHERE age > ${age}
+`
+```
+
+</CodeGroup>
+
+<Warning>
+  Never interpolate user-supplied values directly into a SQL string. Use parameterized queries or the `sql` tagged template to avoid SQL injection.
+</Warning>
+
+## Next steps
+
+<Columns cols={2}>
+  <Card title="EntityManager API" icon="book" href="/working-with-entity-manager/entity-manager-api">
+    Full reference for every method on EntityManager.
+  </Card>
+  <Card title="Working with Repository" icon="database" href="/working-with-entity-manager/working-with-repository">
+    Scoped, entity-specific API for common database operations.
+  </Card>
+  <Card title="Find options" icon="filter" href="/working-with-entity-manager/find-options">
+    Filter, sort, paginate, and lock queries using FindOptions.
+  </Card>
+  <Card title="Transactions" icon="arrows-rotate" href="/advanced-topics/transactions">
+    Manage database transactions and isolation levels.
+  </Card>
+</Columns>

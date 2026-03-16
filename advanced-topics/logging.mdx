@@ -1,0 +1,248 @@
+---
+title: Logging
+description: Enable and configure TypeORM query logging, log categories, built-in loggers, and custom loggers by implementing Logger or extending AbstractLogger.
+---
+
+TypeORM can log SQL queries, errors, schema operations, and internal messages. Logging is configured through your DataSource options.
+
+## Enabling logging
+
+Set `logging: true` to log all queries and errors:
+
+```typescript
+const dataSource = new DataSource({
+    type: "mysql",
+    host: "localhost",
+    port: 3306,
+    username: "test",
+    password: "test",
+    database: "test",
+    logging: true,
+})
+```
+
+## Log categories
+
+Instead of `true`, pass an array to enable only specific categories:
+
+```typescript
+{
+    logging: ["query", "error"]
+}
+```
+
+| Category | What it logs |
+|---|---|
+| `query` | Every SQL query executed. |
+| `error` | Failed queries and driver errors. |
+| `schema` | Schema build and synchronization operations. |
+| `warn` | Internal ORM warnings. |
+| `info` | Internal ORM informational messages. |
+| `log` | Internal ORM log messages. |
+| `migration` | Migration run events (always enabled). |
+
+To enable all categories at once:
+
+```typescript
+{
+    logging: "all"
+}
+```
+
+## Logging slow queries
+
+Set `maxQueryExecutionTime` (in milliseconds) to log any query that exceeds the threshold:
+
+```typescript
+{
+    logging: true,
+    maxQueryExecutionTime: 1000  // log queries slower than 1 second
+}
+```
+
+Slow query logging is always active regardless of the `logging` setting once `maxQueryExecutionTime` is set.
+
+## Built-in loggers
+
+Select a logger with the `logger` option:
+
+```typescript
+{
+    logging: true,
+    logger: "file"
+}
+```
+
+<AccordionGroup>
+  <Accordion title="advanced-console (default)">
+    Logs to the console with color highlighting and SQL syntax formatting. This is the default when `logger` is not specified.
+  </Accordion>
+  <Accordion title="simple-console">
+    Logs to the console without color highlighting. Use this if colorized output causes problems in your environment.
+  </Accordion>
+  <Accordion title="formatted-console">
+    Like `advanced-console` but additionally formats SQL queries for readability using `@sqltools/formatter`.
+  </Accordion>
+  <Accordion title="file">
+    Writes all log output to `ormlogs.log` in the root of your project (next to `package.json`).
+  </Accordion>
+  <Accordion title="debug">
+    Uses the [`debug`](https://github.com/visionmedia/debug) package. Set the environment variable `DEBUG=typeorm:*` to activate it. The `logging` option has no effect when this logger is selected.
+  </Accordion>
+</AccordionGroup>
+
+## Custom logger
+
+You have two options for implementing a custom logger.
+
+### Implementing `Logger` directly
+
+Implement all methods of the `Logger` interface:
+
+```typescript
+import { Logger, QueryRunner } from "typeorm"
+
+export class MyCustomLogger implements Logger {
+    logQuery(query: string, parameters?: any[], queryRunner?: QueryRunner) {
+        console.log(`[QUERY] ${query}`)
+    }
+
+    logQueryError(
+        error: string | Error,
+        query: string,
+        parameters?: any[],
+        queryRunner?: QueryRunner,
+    ) {
+        console.error(`[QUERY ERROR] ${error} — ${query}`)
+    }
+
+    logQuerySlow(
+        time: number,
+        query: string,
+        parameters?: any[],
+        queryRunner?: QueryRunner,
+    ) {
+        console.warn(`[SLOW QUERY: ${time}ms] ${query}`)
+    }
+
+    logSchemaBuild(message: string, queryRunner?: QueryRunner) {
+        console.log(`[SCHEMA] ${message}`)
+    }
+
+    logMigration(message: string, queryRunner?: QueryRunner) {
+        console.log(`[MIGRATION] ${message}`)
+    }
+
+    log(
+        level: "log" | "info" | "warn",
+        message: any,
+        queryRunner?: QueryRunner,
+    ) {
+        console.log(`[${level.toUpperCase()}] ${message}`)
+    }
+}
+```
+
+### Extending `AbstractLogger`
+
+`AbstractLogger` handles the enabled-check logic for each log type. You only need to implement `writeLog`:
+
+```typescript
+import { AbstractLogger, LogLevel, LogMessage, QueryRunner } from "typeorm"
+
+export class MyCustomLogger extends AbstractLogger {
+    protected writeLog(
+        level: LogLevel,
+        logMessage: LogMessage | LogMessage[],
+        queryRunner?: QueryRunner,
+    ) {
+        const messages = this.prepareLogMessages(logMessage, {
+            highlightSql: false,
+        })
+
+        for (const message of messages) {
+            switch (message.type ?? level) {
+                case "log":
+                case "schema-build":
+                case "migration":
+                    console.log(message.message)
+                    break
+
+                case "info":
+                case "query":
+                    if (message.prefix) {
+                        console.info(message.prefix, message.message)
+                    } else {
+                        console.info(message.message)
+                    }
+                    break
+
+                case "warn":
+                case "query-slow":
+                    if (message.prefix) {
+                        console.warn(message.prefix, message.message)
+                    } else {
+                        console.warn(message.message)
+                    }
+                    break
+
+                case "error":
+                case "query-error":
+                    if (message.prefix) {
+                        console.error(message.prefix, message.message)
+                    } else {
+                        console.error(message.message)
+                    }
+                    break
+            }
+        }
+    }
+}
+```
+
+`prepareLogMessages` formats SQL and appends parameters as comments. You can pass options to control this behaviour:
+
+| Option | Default | Description |
+|---|---|---|
+| `highlightSql` | `true` | Apply syntax highlighting to SQL strings. |
+| `formatSql` | `false` | Format SQL for readability. |
+| `appendParameterAsComment` | `true` | Append query parameters as a SQL comment. |
+| `addColonToPrefix` | `true` | Append `:` to the message prefix. |
+
+### Registering a custom logger
+
+Pass an instance to the `logger` option:
+
+```typescript
+import { DataSource } from "typeorm"
+import { MyCustomLogger } from "./logger/MyCustomLogger"
+
+const dataSource = new DataSource({
+    type: "mysql",
+    host: "localhost",
+    port: 3306,
+    username: "test",
+    password: "test",
+    database: "test",
+    logging: true,
+    logger: new MyCustomLogger(),
+})
+```
+
+## Accessing request context in a logger
+
+The `QueryRunner` passed to logger methods carries a `data` object you can use to thread request context through:
+
+```typescript
+// attach data when saving
+postRepository.save(post, { data: { request: req } })
+
+// read it in your logger
+logQuery(query: string, parameters?: any[], queryRunner?: QueryRunner) {
+    const url =
+        queryRunner?.data["request"]
+            ? `(${queryRunner.data["request"].url}) `
+            : ""
+    console.log(`${url}executing query: ${query}`)
+}
+```

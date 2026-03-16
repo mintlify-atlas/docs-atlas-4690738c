@@ -1,0 +1,72 @@
+---
+title: "Why migrations"
+description: "Understand why migrations are necessary for production databases and how they provide safe, versioned schema management."
+---
+
+Once you have data in production, changing the database schema requires precision. Running your application with `synchronize: true` will automatically apply whatever changes TypeORM detects—but in production that is dangerous.
+
+## The problem with `synchronize: true`
+
+`synchronize: true` instructs TypeORM to compare your entity definitions to the live schema on every application start and apply any differences immediately. While this is convenient during development, it carries serious risks in production:
+
+- **Data loss** — dropping a column or table destroys its data with no recovery path.
+- **No review step** — changes go straight to the database without any opportunity to inspect or approve them.
+- **No history** — there is no record of what changed, when, or why.
+- **No rollback** — if a change causes problems, there is nothing to undo.
+
+<Warning>
+  Never use `synchronize: true` in a production database. Always set `synchronize: false` and manage schema changes through migrations.
+</Warning>
+
+## How migrations solve this
+
+A migration is a single file containing SQL queries that update your database schema. Each migration has an `up` method that applies the change and a `down` method that reverses it.
+
+Consider a `Post` entity that has been in production for months:
+
+```typescript
+import { Entity, Column, PrimaryGeneratedColumn } from "typeorm"
+
+@Entity()
+export class Post {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    @Column()
+    title: string
+
+    @Column()
+    text: string
+}
+```
+
+You now need to rename `title` to `name`. With `synchronize: true` you would need to pray nothing goes wrong. With migrations, you write a controlled script:
+
+```sql
+ALTER TABLE "post" RENAME COLUMN "title" TO "name";
+```
+
+You review it, run it manually at a time of your choosing, and can roll it back if needed.
+
+## What migrations give you
+
+<CardGroup cols={2}>
+  <Card title="Version control" icon="git-branch">
+    Migration files live in your repository. Every schema change is tracked alongside the application code that requires it.
+  </Card>
+  <Card title="Controlled execution" icon="play">
+    You decide when to run migrations—during a deployment pipeline, a maintenance window, or a manual process.
+  </Card>
+  <Card title="Reversibility" icon="rotate-left">
+    Every migration has a `down` method. If a release goes wrong, you can revert the schema to its previous state.
+  </Card>
+  <Card title="Shared history" icon="clock-rotate-left">
+    TypeORM records which migrations have been executed in a `migrations` table. Every environment stays in sync.
+  </Card>
+</CardGroup>
+
+## How TypeORM tracks migrations
+
+TypeORM maintains a table in your database (by default named `migrations`) that stores the name and timestamp of every migration that has been executed. When you run `migration:run`, TypeORM queries this table to determine which migrations are pending and runs only those, in timestamp order.
+
+This means you can safely run `migration:run` multiple times—already-applied migrations are skipped.

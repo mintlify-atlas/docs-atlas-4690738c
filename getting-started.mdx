@@ -1,0 +1,226 @@
+---
+title: "Getting Started"
+description: "Install TypeORM and set up your first database connection"
+---
+
+<Steps>
+  <Step title="Install TypeORM">
+    Install the `typeorm` package and the required `reflect-metadata` shim.
+
+    <CodeGroup>
+      ```bash npm
+      npm install typeorm reflect-metadata
+      ```
+      ```bash yarn
+      yarn add typeorm reflect-metadata
+      ```
+      ```bash pnpm
+      pnpm add typeorm reflect-metadata
+      ```
+    </CodeGroup>
+
+    Then import `reflect-metadata` once at the entry point of your application, before any entities are loaded:
+
+    ```typescript src/index.ts
+    import "reflect-metadata"
+    ```
+
+    If you need Node.js type definitions, install them as a dev dependency:
+
+    <CodeGroup>
+      ```bash npm
+      npm install --save-dev @types/node
+      ```
+      ```bash yarn
+      yarn add --dev @types/node
+      ```
+      ```bash pnpm
+      pnpm add --save-dev @types/node
+      ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Configure TypeScript">
+    TypeORM uses TypeScript decorators for entity definitions. Enable the following compiler options in your `tsconfig.json`:
+
+    <Tabs>
+      <Tab title="CommonJS">
+        ```json tsconfig.json
+        {
+          "compilerOptions": {
+            "lib": ["es2023"],
+            "target": "es2022",
+            "module": "commonjs",
+            "moduleResolution": "node",
+            "outDir": "./build",
+            "emitDecoratorMetadata": true,
+            "experimentalDecorators": true,
+            "sourceMap": true
+          }
+        }
+        ```
+      </Tab>
+      <Tab title="ESM">
+        ```json tsconfig.json
+        {
+          "compilerOptions": {
+            "lib": ["es2023"],
+            "target": "es2022",
+            "module": "es2022",
+            "moduleResolution": "node",
+            "allowSyntheticDefaultImports": true,
+            "outDir": "./build",
+            "emitDecoratorMetadata": true,
+            "experimentalDecorators": true,
+            "sourceMap": true
+          }
+        }
+        ```
+      </Tab>
+    </Tabs>
+
+    <Warning>
+      Both `emitDecoratorMetadata` and `experimentalDecorators` are required. TypeORM will not be able to resolve column types without them.
+    </Warning>
+
+    TypeORM requires TypeScript **4.5 or higher**.
+  </Step>
+
+  <Step title="Install a database driver">
+    Install the driver package that matches your database. Only install the driver for the database you are using.
+
+    | Database | Package | Install command |
+    |---|---|---|
+    | PostgreSQL / CockroachDB | `pg` | `npm install pg` |
+    | MySQL / MariaDB | `mysql2` | `npm install mysql2` |
+    | SQLite | `better-sqlite3` | `npm install better-sqlite3` |
+    | Microsoft SQL Server | `mssql` | `npm install mssql` |
+    | Oracle | `oracledb` | `npm install oracledb` |
+    | MongoDB | `mongodb` | `npm install mongodb` |
+    | SAP HANA | `@sap/hana-client` | `npm install @sap/hana-client` |
+    | Google Spanner | `@google-cloud/spanner` | `npm install @google-cloud/spanner` |
+    | sql.js (browser) | `sql.js` | `npm install sql.js` |
+
+    <Tip>
+      See the driver-specific documentation pages for additional setup steps, especially for Oracle and SAP HANA.
+    </Tip>
+  </Step>
+
+  <Step title="Create a DataSource">
+    A `DataSource` holds your connection configuration and manages the connection pool. Create a `src/data-source.ts` file:
+
+    ```typescript src/data-source.ts
+    import "reflect-metadata"
+    import { DataSource } from "typeorm"
+    import { User } from "./entities/User"
+
+    export const AppDataSource = new DataSource({
+        type: "postgres",
+        host: "localhost",
+        port: 5432,
+        username: "root",
+        password: "password",
+        database: "typeorm",
+        synchronize: true,
+        logging: false,
+        entities: [User],
+        migrations: [],
+        subscribers: [],
+    })
+    ```
+
+    Change the `type` field to match your database: `"mysql"`, `"mariadb"`, `"postgres"`, `"cockroachdb"`, `"better-sqlite3"`, `"mssql"`, `"oracle"`, `"sap"`, `"spanner"`, or `"mongodb"`.
+
+    <Warning>
+      `synchronize: true` automatically alters your database schema to match your entities on every application start. Use this only in development — never in production. Use [migrations](/migrations/why) for production schema changes.
+    </Warning>
+  </Step>
+
+  <Step title="Define your first entity">
+    An entity is a TypeScript class that maps to a database table. Create `src/entities/User.ts`:
+
+    ```typescript src/entities/User.ts
+    import { Entity, PrimaryGeneratedColumn, Column } from "typeorm"
+
+    @Entity()
+    export class User {
+        @PrimaryGeneratedColumn()
+        id: number
+
+        @Column()
+        firstName: string
+
+        @Column()
+        lastName: string
+
+        @Column()
+        age: number
+    }
+    ```
+
+    The `@Entity()` decorator marks the class as a database table. Each decorated property becomes a column:
+
+    - `@PrimaryGeneratedColumn()` — auto-incrementing primary key
+    - `@Column()` — a regular column (type is inferred from the TypeScript type)
+
+    TypeORM infers column types from TypeScript types: `string` → `varchar`, `number` → `integer`, `boolean` → `bool`. You can override the type explicitly:
+
+    ```typescript
+    @Column("text")
+    bio: string
+
+    @Column({ length: 100 })
+    name: string
+    ```
+  </Step>
+
+  <Step title="Initialize the DataSource and run the app">
+    Call `initialize()` once when your application starts. Create `src/index.ts`:
+
+    ```typescript src/index.ts
+    import { AppDataSource } from "./data-source"
+    import { User } from "./entities/User"
+
+    AppDataSource.initialize()
+        .then(async () => {
+            console.log("Inserting a new user into the database...")
+            const user = new User()
+            user.firstName = "Timber"
+            user.lastName = "Saw"
+            user.age = 25
+            await AppDataSource.manager.save(user)
+            console.log("Saved a new user with id: " + user.id)
+
+            console.log("Loading users from the database...")
+            const users = await AppDataSource.manager.find(User)
+            console.log("Loaded users: ", users)
+        })
+        .catch((error) => console.log(error))
+    ```
+
+    Run the application:
+
+    ```bash
+    npx ts-node src/index.ts
+    ```
+
+    On first run, TypeORM creates the `user` table in your database (because `synchronize: true`) and inserts the new user.
+  </Step>
+</Steps>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="bolt" href="/quickstart">
+    Scaffold a full project in seconds using the TypeORM CLI
+  </Card>
+  <Card title="Entities" icon="table" href="/entity/entities">
+    Learn about columns, relations, indices, and entity lifecycle hooks
+  </Card>
+  <Card title="Data Source options" icon="sliders" href="/data-source/data-source-options">
+    Explore all available DataSource configuration options
+  </Card>
+  <Card title="Migrations" icon="arrows-rotate" href="/migrations/why">
+    Manage schema changes safely in production with migrations
+  </Card>
+</CardGroup>

@@ -1,0 +1,369 @@
+---
+title: Listeners and subscribers
+description: React to entity lifecycle events using in-entity listener decorators or global EntitySubscriberInterface implementations registered in your DataSource.
+---
+
+TypeORM fires events at key points during an entity's lifecycle. You can react to these events in two ways:
+
+- **Entity listeners** — methods decorated directly on an entity class.
+- **Subscribers** — separate classes that implement `EntitySubscriberInterface` and are registered in your DataSource.
+
+## Entity listeners
+
+Add methods to your entity and annotate them with the appropriate lifecycle decorator. TypeORM calls these methods automatically.
+
+<Warning>
+Do not make database calls inside entity listener methods. For operations that require database access, use [subscribers](#subscribers) instead.
+</Warning>
+
+### `@AfterLoad`
+
+Called each time the entity is loaded via `QueryBuilder` or a repository/manager `find` method:
+
+```typescript
+@Entity()
+export class Post {
+    @AfterLoad()
+    updateCounters() {
+        if (this.likesCount === undefined) this.likesCount = 0
+    }
+}
+```
+
+### `@BeforeInsert`
+
+Called before the entity is inserted with `save`:
+
+```typescript
+@Entity()
+export class Post {
+    @BeforeInsert()
+    updateDates() {
+        this.createdDate = new Date()
+    }
+}
+```
+
+### `@AfterInsert`
+
+Called after the entity is inserted with `save`:
+
+```typescript
+@Entity()
+export class Post {
+    @AfterInsert()
+    resetCounters() {
+        this.counters = 0
+    }
+}
+```
+
+### `@BeforeUpdate`
+
+Called before an existing entity is updated with `save`. Only fires when the model has actually changed — calling `save` without modifications skips this hook:
+
+```typescript
+@Entity()
+export class Post {
+    @BeforeUpdate()
+    updateDates() {
+        this.updatedDate = new Date()
+    }
+}
+```
+
+### `@AfterUpdate`
+
+Called after an existing entity is updated with `save`:
+
+```typescript
+@Entity()
+export class Post {
+    @AfterUpdate()
+    updateCounters() {
+        this.counter = 0
+    }
+}
+```
+
+### `@BeforeRemove`
+
+Called before the entity is removed with `remove`:
+
+```typescript
+@Entity()
+export class Post {
+    @BeforeRemove()
+    updateStatus() {
+        this.status = "removed"
+    }
+}
+```
+
+### `@AfterRemove`
+
+Called after the entity is removed with `remove`:
+
+```typescript
+@Entity()
+export class Post {
+    @AfterRemove()
+    updateStatus() {
+        this.status = "removed"
+    }
+}
+```
+
+### `@BeforeSoftRemove`
+
+Called before the entity is soft-removed with `softRemove`:
+
+```typescript
+@Entity()
+export class Post {
+    @BeforeSoftRemove()
+    updateStatus() {
+        this.status = "soft-removed"
+    }
+}
+```
+
+### `@AfterSoftRemove`
+
+Called after the entity is soft-removed with `softRemove`:
+
+```typescript
+@Entity()
+export class Post {
+    @AfterSoftRemove()
+    updateStatus() {
+        this.status = "soft-removed"
+    }
+}
+```
+
+### `@BeforeRecover`
+
+Called before the entity is recovered with `recover`:
+
+```typescript
+@Entity()
+export class Post {
+    @BeforeRecover()
+    updateStatus() {
+        this.status = "recovered"
+    }
+}
+```
+
+### `@AfterRecover`
+
+Called after the entity is recovered with `recover`:
+
+```typescript
+@Entity()
+export class Post {
+    @AfterRecover()
+    updateStatus() {
+        this.status = "recovered"
+    }
+}
+```
+
+## Subscribers
+
+Subscribers are standalone classes decorated with `@EventSubscriber()` that implement `EntitySubscriberInterface`. They are more powerful than entity listeners because they can perform database operations through the event's `queryRunner` or `manager`.
+
+### Listening to a specific entity
+
+Implement `listenTo()` to restrict the subscriber to one entity type:
+
+```typescript
+import {
+    EventSubscriber,
+    EntitySubscriberInterface,
+    InsertEvent,
+} from "typeorm"
+import { Post } from "./entity/Post"
+
+@EventSubscriber()
+export class PostSubscriber implements EntitySubscriberInterface<Post> {
+    listenTo() {
+        return Post
+    }
+
+    beforeInsert(event: InsertEvent<Post>) {
+        console.log(`BEFORE POST INSERTED:`, event.entity)
+    }
+}
+```
+
+### Listening to all entities
+
+Omit `listenTo()` to receive events for every entity:
+
+```typescript
+import {
+    EventSubscriber,
+    EntitySubscriberInterface,
+    InsertEvent,
+    UpdateEvent,
+    RemoveEvent,
+    SoftRemoveEvent,
+    RecoverEvent,
+    TransactionStartEvent,
+    TransactionCommitEvent,
+    TransactionRollbackEvent,
+    BeforeQueryEvent,
+    AfterQueryEvent,
+} from "typeorm"
+
+@EventSubscriber()
+export class AuditSubscriber implements EntitySubscriberInterface {
+    afterLoad(entity: any) {
+        console.log(`AFTER ENTITY LOADED:`, entity)
+    }
+
+    beforeQuery(event: BeforeQueryEvent<any>) {
+        console.log(`BEFORE QUERY:`, event.query)
+    }
+
+    afterQuery(event: AfterQueryEvent<any>) {
+        console.log(`AFTER QUERY:`, event.query)
+    }
+
+    beforeInsert(event: InsertEvent<any>) {
+        console.log(`BEFORE ENTITY INSERTED:`, event.entity)
+    }
+
+    afterInsert(event: InsertEvent<any>) {
+        console.log(`AFTER ENTITY INSERTED:`, event.entity)
+    }
+
+    beforeUpdate(event: UpdateEvent<any>) {
+        console.log(`BEFORE ENTITY UPDATED:`, event.entity)
+    }
+
+    afterUpdate(event: UpdateEvent<any>) {
+        console.log(`AFTER ENTITY UPDATED:`, event.entity)
+    }
+
+    beforeRemove(event: RemoveEvent<any>) {
+        console.log(`BEFORE ENTITY ${event.entityId} REMOVED:`, event.entity)
+    }
+
+    afterRemove(event: RemoveEvent<any>) {
+        console.log(`AFTER ENTITY ${event.entityId} REMOVED:`, event.entity)
+    }
+
+    beforeSoftRemove(event: SoftRemoveEvent<any>) {
+        console.log(`BEFORE ENTITY ${event.entityId} SOFT REMOVED:`, event.entity)
+    }
+
+    afterSoftRemove(event: SoftRemoveEvent<any>) {
+        console.log(`AFTER ENTITY ${event.entityId} SOFT REMOVED:`, event.entity)
+    }
+
+    beforeRecover(event: RecoverEvent<any>) {
+        console.log(`BEFORE ENTITY ${event.entityId} RECOVERED:`, event.entity)
+    }
+
+    afterRecover(event: RecoverEvent<any>) {
+        console.log(`AFTER ENTITY ${event.entityId} RECOVERED:`, event.entity)
+    }
+
+    beforeTransactionStart(event: TransactionStartEvent) {
+        console.log(`BEFORE TRANSACTION STARTED:`, event)
+    }
+
+    afterTransactionStart(event: TransactionStartEvent) {
+        console.log(`AFTER TRANSACTION STARTED:`, event)
+    }
+
+    beforeTransactionCommit(event: TransactionCommitEvent) {
+        console.log(`BEFORE TRANSACTION COMMITTED:`, event)
+    }
+
+    afterTransactionCommit(event: TransactionCommitEvent) {
+        console.log(`AFTER TRANSACTION COMMITTED:`, event)
+    }
+
+    beforeTransactionRollback(event: TransactionRollbackEvent) {
+        console.log(`BEFORE TRANSACTION ROLLBACK:`, event)
+    }
+
+    afterTransactionRollback(event: TransactionRollbackEvent) {
+        console.log(`AFTER TRANSACTION ROLLBACK:`, event)
+    }
+}
+```
+
+### Registering subscribers in DataSource
+
+Add your subscriber classes to the `subscribers` array in your DataSource options:
+
+```typescript
+import { DataSource } from "typeorm"
+import { PostSubscriber } from "./subscriber/PostSubscriber"
+import { AuditSubscriber } from "./subscriber/AuditSubscriber"
+
+const dataSource = new DataSource({
+    type: "postgres",
+    // ... connection options
+    subscribers: [PostSubscriber, AuditSubscriber],
+})
+```
+
+### Event object properties
+
+Every subscriber method (except `listenTo`) receives an event object. All event objects share these base properties:
+
+| Property | Type | Description |
+|---|---|---|
+| `dataSource` | `DataSource` | The DataSource used for this event. |
+| `queryRunner` | `QueryRunner` | The QueryRunner for the current transaction. |
+| `manager` | `EntityManager` | The EntityManager for the current transaction. |
+
+<Note>
+Always perform database operations in subscribers using `event.queryRunner` or `event.manager` — not a repository or manager obtained from outside the event. This ensures the operation participates in the same transaction.
+</Note>
+
+### `entity` availability with `Repository.update()`
+
+When `Repository.update()` is used, `event.entity` only contains the partial values that were passed to `update()` — primary keys are not included automatically:
+
+```typescript
+await postRepository.update(post.id, { description: "New description" })
+
+// in subscriber
+afterUpdate(event: UpdateEvent<Post>) {
+    console.log(event.entity)
+    // outputs { description: 'New description' } — no id
+}
+```
+
+To include primary keys, either pass them explicitly in the partial object or use `Repository.save()` instead.
+
+## `EntitySubscriberInterface` method reference
+
+| Method | Event type | Fired when |
+|---|---|---|
+| `afterLoad` | `LoadEvent` | Entity loaded from DB. |
+| `beforeQuery` | `BeforeQueryEvent` | Before any query runs. |
+| `afterQuery` | `AfterQueryEvent` | After any query runs. |
+| `beforeInsert` | `InsertEvent` | Before `save` inserts a new row. |
+| `afterInsert` | `InsertEvent` | After `save` inserts a new row. |
+| `beforeUpdate` | `UpdateEvent` | Before `save` updates an existing row. |
+| `afterUpdate` | `UpdateEvent` | After `save` updates an existing row. |
+| `beforeRemove` | `RemoveEvent` | Before `remove`. |
+| `afterRemove` | `RemoveEvent` | After `remove`. |
+| `beforeSoftRemove` | `SoftRemoveEvent` | Before `softRemove`. |
+| `afterSoftRemove` | `SoftRemoveEvent` | After `softRemove`. |
+| `beforeRecover` | `RecoverEvent` | Before `recover`. |
+| `afterRecover` | `RecoverEvent` | After `recover`. |
+| `beforeTransactionStart` | `TransactionStartEvent` | Before a transaction starts. |
+| `afterTransactionStart` | `TransactionStartEvent` | After a transaction starts. |
+| `beforeTransactionCommit` | `TransactionCommitEvent` | Before a transaction commits. |
+| `afterTransactionCommit` | `TransactionCommitEvent` | After a transaction commits. |
+| `beforeTransactionRollback` | `TransactionRollbackEvent` | Before a transaction rolls back. |
+| `afterTransactionRollback` | `TransactionRollbackEvent` | After a transaction rolls back. |

@@ -1,0 +1,527 @@
+---
+title: "EntityManager API"
+description: "Complete method reference for TypeORM EntityManager, the unified interface for persisting, querying, and managing all entity types."
+---
+
+## Properties
+
+<ParamField path="connection" type="DataSource">
+  The `DataSource` used by this `EntityManager`.
+
+  ```typescript
+  const dataSource = manager.connection
+  ```
+</ParamField>
+
+<ParamField path="queryRunner" type="QueryRunner | undefined">
+  The query runner used by this manager. Defined only on transactional `EntityManager` instances.
+
+  ```typescript
+  const queryRunner = manager.queryRunner
+  ```
+</ParamField>
+
+---
+
+## Querying
+
+### find
+
+Finds entities that match the given `FindManyOptions`.
+
+```typescript
+const users = await manager.find(User, {
+    where: { isActive: true },
+    order: { createdAt: "DESC" },
+    take: 20,
+})
+```
+
+### findBy
+
+Finds entities that match the given `FindOptionsWhere` conditions. A simpler alternative to `find` when you only need `where` conditions.
+
+```typescript
+const timbers = await manager.findBy(User, { firstName: "Timber" })
+```
+
+### findOne
+
+Returns the first entity that matches `FindOneOptions`, or `null` if none is found.
+
+```typescript
+const user = await manager.findOne(User, {
+    where: { email: "timber@example.com" },
+    relations: { profile: true },
+})
+```
+
+### findOneBy
+
+Returns the first entity matching `FindOptionsWhere`, or `null`.
+
+```typescript
+const user = await manager.findOneBy(User, { id: 1 })
+```
+
+### findOneOrFail
+
+Same as `findOne` but rejects the promise with `EntityNotFoundError` if no entity is found.
+
+```typescript
+const user = await manager.findOneOrFail(User, {
+    where: { id: 1 },
+})
+```
+
+### findOneByOrFail
+
+Same as `findOneBy` but rejects the promise with `EntityNotFoundError` if no entity is found.
+
+```typescript
+const user = await manager.findOneByOrFail(User, { id: 1 })
+```
+
+### findAndCount
+
+Finds entities matching `FindManyOptions` and returns a tuple of `[entities, totalCount]`. The count ignores `skip`/`take` so it reflects the full result set size — useful for pagination metadata.
+
+```typescript
+const [users, total] = await manager.findAndCount(User, {
+    where: { isActive: true },
+    take: 10,
+    skip: 0,
+})
+```
+
+### findAndCountBy
+
+Same as `findAndCount` but accepts `FindOptionsWhere` instead of `FindManyOptions`.
+
+```typescript
+const [users, total] = await manager.findAndCountBy(User, { firstName: "Timber" })
+```
+
+---
+
+## Counting and existence
+
+### count
+
+Counts entities that match `FindOptions`.
+
+```typescript
+const count = await manager.count(User, {
+    where: { isActive: true },
+})
+```
+
+### countBy
+
+Counts entities that match `FindOptionsWhere`.
+
+```typescript
+const count = await manager.countBy(User, { firstName: "Timber" })
+```
+
+### exists
+
+Returns `true` if at least one entity matches `FindOptions`.
+
+```typescript
+const exists = await manager.exists(User, {
+    where: { email: "timber@example.com" },
+})
+```
+
+### existsBy
+
+Returns `true` if at least one entity matches `FindOptionsWhere`.
+
+```typescript
+const exists = await manager.existsBy(User, { firstName: "Timber" })
+```
+
+---
+
+## Persistence
+
+### save
+
+Saves an entity or array of entities. Issues an `INSERT` for new entities and an `UPDATE` for existing ones (determined by the presence of a primary key). Undefined properties are skipped; set a property to `null` explicitly to store `NULL`.
+
+```typescript
+// Save a single entity
+await manager.save(user)
+
+// Save multiple entities in one transaction
+await manager.save([category1, category2, category3])
+```
+
+Accepts optional `SaveOptions`:
+
+```typescript
+await manager.save(users, { chunk: 1000, transaction: false })
+```
+
+### insert
+
+Inserts a new entity or array of entities. Always runs `INSERT` — does not check for existing records.
+
+```typescript
+await manager.insert(User, {
+    firstName: "Timber",
+    lastName: "Saw",
+})
+
+await manager.insert(User, [
+    { firstName: "Foo", lastName: "Bar" },
+    { firstName: "Rizz", lastName: "Rak" },
+])
+```
+
+### update
+
+Updates rows matching the given criteria. Does not load entities — issues a direct `UPDATE` statement.
+
+```typescript
+// Update by primary key
+await manager.update(User, 1, { firstName: "Rizzrak" })
+// UPDATE user SET firstName = 'Rizzrak' WHERE id = 1
+
+// Update by condition
+await manager.update(User, { isActive: false }, { deletedAt: new Date() })
+// UPDATE user SET deletedAt = ... WHERE isActive = false
+
+// Bulk update with multiple condition sets
+await manager.update(User, [
+    { criteria: { id: 1 }, data: { firstName: "Rizzrak" } },
+    { criteria: { id: 2 }, data: { firstName: "Karzzir" } },
+])
+```
+
+Pass an array of condition objects to match multiple sets of rows (conditions are OR'd):
+
+```typescript
+await manager.update(User, [{ status: "expired" }, { flagged: true }], {
+    active: false,
+})
+// UPDATE user SET active = false WHERE status = 'expired' OR flagged = true
+```
+
+### updateAll
+
+Updates **all** rows of the target entity without a `WHERE` clause.
+
+```typescript
+await manager.updateAll(User, { category: "ADULT" })
+// UPDATE user SET category = 'ADULT'
+```
+
+<Warning>
+  `updateAll` issues an unconditional `UPDATE`. There is no `WHERE` clause — every row in the table will be updated.
+</Warning>
+
+### upsert
+
+Inserts rows that do not exist and updates rows that do, based on the specified conflict columns. Supported on PostgreSQL, CockroachDB, MySQL, SQLite, and the Aurora Data API.
+
+When an upsert results in an update, `@UpdateDateColumn` and `@VersionColumn` are automatically refreshed. Columns marked with `update: false` are never included in the update set.
+
+```typescript
+await manager.upsert(
+    User,
+    [
+        { externalId: "abc123", firstName: "Rizzrak" },
+        { externalId: "bca321", firstName: "Karzzir" },
+    ],
+    ["externalId"],
+)
+// INSERT INTO user VALUES ...
+// ON CONFLICT (externalId) DO UPDATE SET firstName = EXCLUDED.firstName
+```
+
+### remove
+
+Removes an entity or array of entities. Fires lifecycle hooks (`@BeforeRemove`, `@AfterRemove`).
+
+```typescript
+await manager.remove(user)
+await manager.remove([category1, category2, category3])
+```
+
+### delete
+
+Deletes rows by primary key, array of primary keys, or condition object. Does **not** load entities and does not fire lifecycle hooks.
+
+```typescript
+await manager.delete(User, 1)
+await manager.delete(User, [1, 2, 3])
+await manager.delete(User, { firstName: "Timber" })
+```
+
+Pass an array of condition objects to delete rows matching any of the conditions:
+
+```typescript
+await manager.delete(User, [{ id: 1 }, { email: "old@example.com" }])
+// DELETE FROM user WHERE id = 1 OR email = 'old@example.com'
+```
+
+<Note>
+  Passing a primitive array is treated as a list of IDs (`WHERE id IN (...)`). Passing an object array applies each element as a separate condition (OR'd together).
+</Note>
+
+### deleteAll
+
+Deletes **all** rows of the target entity without a `WHERE` clause.
+
+```typescript
+await manager.deleteAll(User)
+// DELETE FROM user
+```
+
+### softDelete
+
+Soft-deletes rows by setting the `@DeleteDateColumn` value. The row is retained in the database.
+
+```typescript
+await manager.softDelete(User, 1)
+await manager.softDelete(User, [1, 2, 3])
+await manager.softDelete(User, { firstName: "Timber" })
+```
+
+### restore
+
+Restores soft-deleted rows by clearing the `@DeleteDateColumn` value.
+
+```typescript
+await manager.restore(User, 1)
+await manager.restore(User, { firstName: "Timber" })
+```
+
+---
+
+## Entity construction
+
+### create
+
+Creates a new entity instance. Copies only properties that exist in the entity schema.
+
+```typescript
+const user = manager.create(User)
+// same as: const user = new User()
+
+const user = manager.create(User, {
+    id: 1,
+    firstName: "Timber",
+    lastName: "Saw",
+})
+```
+
+### merge
+
+Merges multiple partial objects into an existing entity instance.
+
+```typescript
+const user = new User()
+manager.merge(User, user, { firstName: "Timber" }, { lastName: "Saw" })
+// same as: user.firstName = "Timber"; user.lastName = "Saw"
+```
+
+### preload
+
+Creates an entity by loading it from the database (using the ID in the provided object) and then replacing its properties with values from the provided object. Returns `undefined` if no entity with that ID exists.
+
+```typescript
+const partialUser = { id: 1, firstName: "Rizzrak", profile: { id: 1 } }
+const user = await manager.preload(User, partialUser)
+// user has all DB properties with firstName overridden to "Rizzrak"
+```
+
+### hasId
+
+Returns `true` if the entity has its primary column property defined.
+
+```typescript
+if (manager.hasId(user)) {
+    // user has a primary key value
+}
+```
+
+### getId
+
+Returns the primary key value(s) of the entity. For composite primary keys, returns an object mapping column names to values.
+
+```typescript
+const userId = manager.getId(user) // e.g., 1
+```
+
+---
+
+## Atomic updates
+
+### increment
+
+Increments a numeric column by the given amount for all rows matching the condition.
+
+```typescript
+await manager.increment(User, { firstName: "Timber" }, "age", 3)
+// UPDATE user SET age = age + 3 WHERE firstName = 'Timber'
+```
+
+### decrement
+
+Decrements a numeric column by the given amount for all rows matching the condition.
+
+```typescript
+await manager.decrement(User, { firstName: "Timber" }, "age", 3)
+// UPDATE user SET age = age - 3 WHERE firstName = 'Timber'
+```
+
+---
+
+## Transactions and queries
+
+### transaction
+
+Wraps a function in a database transaction. All operations inside the callback must use the provided `EntityManager` instance.
+
+```typescript
+await manager.transaction(async (transactionalManager) => {
+    await transactionalManager.save(user)
+    await transactionalManager.save(profile)
+})
+```
+
+Optionally specify an isolation level:
+
+```typescript
+await manager.transaction("SERIALIZABLE", async (transactionalManager) => {
+    // ...
+})
+```
+
+Available isolation levels: `"READ UNCOMMITTED"`, `"READ COMMITTED"`, `"REPEATABLE READ"`, `"SERIALIZABLE"`.
+
+### query
+
+Executes a raw SQL query and returns the raw database result. The parameter syntax varies by driver:
+
+<CodeGroup>
+
+```typescript MySQL / SQLite / MariaDB
+const result = await manager.query(
+    "SELECT * FROM users WHERE name = ? AND age = ?",
+    ["John", 24],
+)
+```
+
+```typescript PostgreSQL / CockroachDB
+const result = await manager.query(
+    "SELECT * FROM users WHERE name = $1 AND age = $2",
+    ["John", 24],
+)
+```
+
+```typescript MSSQL
+const result = await manager.query(
+    "SELECT * FROM users WHERE name = @0 AND age = @1",
+    ["John", 24],
+)
+```
+
+```typescript Oracle
+const result = await manager.query(
+    "SELECT * FROM users WHERE name = :1 AND age = :2",
+    ["John", 24],
+)
+```
+
+</CodeGroup>
+
+### sql
+
+Tagged template literal that executes a raw SQL query. Template expressions are automatically parameterized — safe for user input.
+
+```typescript
+const name = "John"
+const age = 24
+const result = await manager.sql`
+    SELECT * FROM users WHERE name = ${name} AND age = ${age}
+`
+```
+
+### createQueryBuilder
+
+Creates a `SelectQueryBuilder` for building complex queries.
+
+```typescript
+const users = await manager
+    .createQueryBuilder()
+    .select()
+    .from(User, "user")
+    .where("user.name = :name", { name: "John" })
+    .getMany()
+```
+
+---
+
+## Table operations
+
+### clear
+
+Truncates the table for the given entity. Faster than `deleteAll` but non-transactional on most databases.
+
+```typescript
+await manager.clear(User)
+
+// Cascade truncation (PostgreSQL/CockroachDB and Oracle only)
+await manager.clear(User, { cascade: true })
+```
+
+---
+
+## Repository access
+
+### getRepository
+
+Returns a `Repository` scoped to the given entity. Respects any active transaction on the manager.
+
+```typescript
+const userRepository = manager.getRepository(User)
+```
+
+### getTreeRepository
+
+Returns a `TreeRepository` for an entity decorated with `@Tree`.
+
+```typescript
+const categoryRepository = manager.getTreeRepository(Category)
+```
+
+### getMongoRepository
+
+Returns a `MongoRepository` for use with MongoDB data sources.
+
+```typescript
+const userRepository = manager.getMongoRepository(User)
+```
+
+### withRepository
+
+Returns a transaction-scoped instance of a custom repository. Use this inside `transaction()` when your custom repository was created with `.extend()`.
+
+```typescript
+await dataSource.manager.transaction(async (manager) => {
+    const userRepository = manager.withRepository(UserRepository)
+    await userRepository.findByName("Timber", "Saw")
+})
+```
+
+### release
+
+Releases the query runner held by this `EntityManager`. Only applicable when a query runner was created and managed manually.
+
+```typescript
+await manager.release()
+```

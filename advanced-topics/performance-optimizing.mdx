@@ -1,0 +1,277 @@
+---
+title: Performance and optimization
+description: Techniques for optimizing TypeORM applications — connection pooling, selective loading, pagination, N+1 avoidance, query caching, streaming, and raw queries.
+---
+
+ORM convenience can come at the cost of efficiency if you do not pay attention to how queries are generated. This page covers the most effective optimizations available in TypeORM.
+
+## Connection pooling
+
+TypeORM reuses database connections through a pool rather than opening a new connection for every query. Set the pool size to match your workload:
+
+```typescript
+const dataSource = new DataSource({
+    type: "postgres",
+    host: "localhost",
+    port: 5432,
+    username: "user",
+    password: "password",
+    database: "mydb",
+    extra: {
+        // for pg driver
+        max: 20,   // maximum pool size
+        min: 2,    // minimum idle connections
+        idleTimeoutMillis: 30000,
+    },
+})
+```
+
+A pool that is too small causes queries to queue; a pool that is too large exhausts database server resources. A good starting point is 10–20 connections per application instance.
+
+## Selecting only the columns you need
+
+By default TypeORM fetches all columns. Use `select` to limit the payload:
+
+```typescript
+const users = await dataSource
+    .getRepository(User)
+    .createQueryBuilder("user")
+    .select(["user.id", "user.name", "user.email"])
+    .getMany()
+```
+
+For read-heavy paths where you do not need hydrated entity objects, `getRawMany()` skips the entity mapping step entirely:
+
+```typescript
+const rawPosts = await dataSource
+    .getRepository(Post)
+    .createQueryBuilder("post")
+    .select(["post.title", "post.createdAt"])
+    .getRawMany()
+```
+
+## Avoiding the N+1 problem
+
+The N+1 problem occurs when the ORM issues one query for a list of N rows and then one additional query per row to load a relation — resulting in N+1 total queries.
+
+**Problematic pattern (N+1):**
+
+```typescript
+const users = await userRepository.find()  // 1 query
+for (const user of users) {
+    const posts = await user.posts  // N queries
+}
+```
+
+**Correct pattern (single JOIN query):**
+
+```typescript
+const users = await dataSource
+    .getRepository(User)
+    .createQueryBuilder("user")
+    .leftJoinAndSelect("user.posts", "post")
+    .getMany()  // 1 query
+```
+
+Use `leftJoinAndSelect` when the relation is optional and you still want the parent row, or `innerJoinAndSelect` when every parent is guaranteed to have at least one related row.
+
+## Eager vs lazy loading
+
+<Tabs>
+  <Tab title="Eager loading">
+    Mark a relation `eager: true` and TypeORM automatically loads it whenever the parent entity is queried.
+
+    ```typescript
+    @Entity()
+    export class User {
+        @OneToMany(() => Post, (post) => post.user, { eager: true })
+        posts: Post[]
+    }
+    ```
+
+    **Use when:** You almost always need the relation alongside the parent.
+
+    **Avoid when:** The relation is large or only needed in some code paths — every query will carry the overhead.
+  </Tab>
+  <Tab title="Lazy loading">
+    Mark a relation `lazy: true` and the property becomes a `Promise` that resolves on first access.
+
+    ```typescript
+    @Entity()
+    export class User {
+        @OneToMany(() => Post, (post) => post.user, { lazy: true })
+        posts: Promise<Post[]>
+    }
+    ```
+
+    ```typescript
+    const user = await userRepository.findOne({ where: { id: userId } })
+    const posts = await user.posts  // query runs here
+    ```
+
+    **Use when:** The relation is rarely needed, or access is conditional.
+
+    **Avoid when:** You iterate over many entities and access the relation on each — this produces an N+1 pattern.
+  </Tab>
+</Tabs>
+
+<Tip>
+Prefer explicit `leftJoinAndSelect` in QueryBuilder over both eager and lazy loading for performance-sensitive code paths. It gives you full control over when and how relations are fetched.
+</Tip>
+
+## Using indices
+
+Indices dramatically reduce the amount of data the database engine scans for filtered queries. Apply them to columns used frequently in `WHERE` clauses, `JOIN` conditions, and `ORDER BY`:
+
+```typescript
+import { Entity, Column, Index, PrimaryGeneratedColumn } from "typeorm"
+
+@Entity()
+@Index(["firstName", "lastName"])  // composite index for combined searches
+export class User {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    @Column()
+    firstName: string
+
+    @Column()
+    @Index()  // single-column index
+    email: string
+
+    @Column()
+    lastName: string
+}
+```
+
+See [Indices](/advanced-topics/indices) for the full decorator reference.
+
+## Pagination
+
+Never return unbounded result sets. Use `limit` and `offset` for page-based pagination:
+
+```typescript
+const PAGE_SIZE = 20
+const page = 3
+
+const users = await userRepository
+    .createQueryBuilder("user")
+    .orderBy("user.id", "ASC")
+    .limit(PAGE_SIZE)
+    .offset((page - 1) * PAGE_SIZE)
+    .getMany()
+```
+
+<Note>
+`offset`-based pagination becomes slow on large tables as the offset grows, because the database still scans all preceding rows. For high-performance pagination on large datasets, use cursor-based pagination: filter by the last seen ID (`WHERE id > :lastId`) and rely on an index on that column.
+</Note>
+
+```typescript
+// cursor-based pagination — efficient on large tables
+const users = await userRepository
+    .createQueryBuilder("user")
+    .where("user.id > :lastId", { lastId })
+    .orderBy("user.id", "ASC")
+    .limit(PAGE_SIZE)
+    .getMany()
+```
+
+## Query result caching
+
+TypeORM has built-in query caching that stores results and returns them on subsequent identical queries without hitting the database.
+
+```typescript
+const users = await userRepository
+    .createQueryBuilder("user")
+    .cache(true)          // use the default cache duration
+    .getMany()
+
+// or specify duration in milliseconds
+const users = await userRepository
+    .createQueryBuilder("user")
+    .cache(60000)         // cache for 60 seconds
+    .getMany()
+```
+
+For production workloads, back the cache with Redis:
+
+```typescript
+const dataSource = new DataSource({
+    type: "mysql",
+    host: "localhost",
+    port: 3306,
+    username: "test",
+    password: "test",
+    database: "test",
+    cache: {
+        type: "redis",
+        options: {
+            host: "localhost",
+            port: 6379,
+        },
+    },
+})
+```
+
+See [Caching](/query-builder/caching) for full caching configuration options.
+
+## Streaming large result sets
+
+For large exports or batch processing, stream rows instead of loading everything into memory:
+
+```typescript
+const queryRunner = dataSource.createQueryRunner()
+await queryRunner.connect()
+
+const stream = await queryRunner.stream(
+    "SELECT id, email FROM users WHERE active = true",
+)
+
+stream.on("data", (row) => {
+    // process one row at a time
+    console.log(row)
+})
+
+stream.on("end", async () => {
+    await queryRunner.release()
+})
+
+stream.on("error", async (err) => {
+    console.error(err)
+    await queryRunner.release()
+})
+```
+
+## Raw queries for read-heavy paths
+
+For reporting or analytics queries where entity hydration is unnecessary overhead, use `DataSource.query()` to execute SQL directly:
+
+```typescript
+const results = await dataSource.query(`
+    SELECT
+        category,
+        COUNT(*) AS total,
+        AVG(price) AS avg_price
+    FROM products
+    WHERE active = true
+    GROUP BY category
+    ORDER BY total DESC
+`)
+```
+
+This avoids all ORM mapping overhead and is the fastest read option TypeORM provides.
+
+## Query hints
+
+Some databases support optimizer hints embedded in SQL comments. Use `DataSource.query()` to pass them through:
+
+```typescript
+// MySQL: limit query execution time to 1 second
+const result = await dataSource.query(`
+    SELECT /*+ MAX_EXECUTION_TIME(1000) */ *
+    FROM users
+    WHERE email = ?
+`, [email])
+```
+
+Hints are database-specific. Consult your database documentation for supported syntax.

@@ -1,0 +1,307 @@
+---
+title: "Many-to-many relations"
+description: "Model associations where both entities can have multiple counterparts. @ManyToMany creates a junction table automatically; use an intermediate entity for extra columns."
+---
+
+A many-to-many relation is one where Entity A can have multiple instances of Entity B and Entity B can have multiple instances of Entity A. A typical example is `Question` and `Category`: a question can belong to many categories, and a category can contain many questions.
+
+## Basic setup
+
+Define the target entity:
+
+```typescript category.entity.ts
+import { Entity, PrimaryGeneratedColumn, Column } from "typeorm"
+
+@Entity()
+export class Category {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    @Column()
+    name: string
+}
+```
+
+On the owning side, add both `@ManyToMany` and `@JoinTable`:
+
+```typescript question.entity.ts
+import {
+    Entity,
+    PrimaryGeneratedColumn,
+    Column,
+    ManyToMany,
+    JoinTable,
+} from "typeorm"
+import { Category } from "./Category"
+
+@Entity()
+export class Question {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    @Column()
+    title: string
+
+    @Column()
+    text: string
+
+    @ManyToMany(() => Category)
+    @JoinTable()
+    categories: Category[]
+}
+```
+
+`@JoinTable` is required on the owning side only. TypeORM creates a junction table automatically:
+
+```
++-------------+--------------+----------------------------+
+|                        category                         |
++-------------+--------------+----------------------------+
+| id          | int          | PRIMARY KEY AUTO_INCREMENT |
+| name        | varchar(255) |                            |
++-------------+--------------+----------------------------+
+
++-------------+--------------+----------------------------+
+|                        question                         |
++-------------+--------------+----------------------------+
+| id          | int          | PRIMARY KEY AUTO_INCREMENT |
+| title       | varchar(255) |                            |
+| text        | varchar(255) |                            |
++-------------+--------------+----------------------------+
+
++-------------+--------------+----------------------------+
+|              question_categories_category               |
++-------------+--------------+----------------------------+
+| questionId  | int          | PRIMARY KEY FOREIGN KEY    |
+| categoryId  | int          | PRIMARY KEY FOREIGN KEY    |
++-------------+--------------+----------------------------+
+```
+
+## Saving the relation
+
+Assign the array of related entities and save the owner:
+
+```typescript
+const category1 = new Category()
+category1.name = "animals"
+await dataSource.manager.save(category1)
+
+const category2 = new Category()
+category2.name = "zoo"
+await dataSource.manager.save(category2)
+
+const question = new Question()
+question.title = "dogs"
+question.text = "who let the dogs out?"
+question.categories = [category1, category2]
+await dataSource.manager.save(question)
+```
+
+With `cascade: true`, you can skip saving categories separately:
+
+```typescript with cascade
+@ManyToMany(() => Category, (category) => category.questions, {
+    cascade: true,
+})
+@JoinTable()
+categories: Category[]
+```
+
+## Deleting the relation
+
+To remove a many-to-many link, filter out the entry and save the owner. This removes only the junction table row — both entities remain:
+
+```typescript
+const question = await dataSource.getRepository(Question).findOne({
+    relations: { categories: true },
+    where: { id: 1 },
+})
+
+question.categories = question.categories.filter(
+    (category) => category.id !== categoryToRemove.id,
+)
+await dataSource.manager.save(question)
+```
+
+### Soft deleting with cascade
+
+When `cascade: true` is set, calling `softRemove` on the owner propagates to related entities:
+
+```typescript
+const category1 = new Category()
+category1.name = "animals"
+
+const category2 = new Category()
+category2.name = "zoo"
+
+const question = new Question()
+question.categories = [category1, category2]
+const saved = await dataSource.manager.save(question)
+
+// soft-deletes question AND its categories
+await dataSource.manager.softRemove(saved)
+```
+
+## Loading the relation
+
+<CodeGroup>
+
+```typescript find options
+const questions = await dataSource.getRepository(Question).find({
+    relations: { categories: true },
+})
+```
+
+```typescript QueryBuilder
+const questions = await dataSource
+    .getRepository(Question)
+    .createQueryBuilder("question")
+    .leftJoinAndSelect("question.categories", "category")
+    .getMany()
+```
+
+</CodeGroup>
+
+## Bidirectional many-to-many
+
+Add `@ManyToMany` on the inverse side and wire up both sides with the inverse function. `@JoinTable` goes on one side only:
+
+<CodeGroup>
+
+```typescript category.entity.ts (bidirectional)
+import { Entity, PrimaryGeneratedColumn, Column, ManyToMany } from "typeorm"
+import type { Question } from "./Question"
+import { Relation } from "typeorm"
+
+@Entity()
+export class Category {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    @Column()
+    name: string
+
+    @ManyToMany(() => Question, (question) => question.categories)
+    questions: Relation<Question>[]
+}
+```
+
+```typescript question.entity.ts (bidirectional)
+import {
+    Entity,
+    PrimaryGeneratedColumn,
+    Column,
+    ManyToMany,
+    JoinTable,
+} from "typeorm"
+import { Category } from "./Category"
+import { Relation } from "typeorm"
+
+@Entity()
+export class Question {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    @Column()
+    title: string
+
+    @Column()
+    text: string
+
+    @ManyToMany(() => Category, (category) => category.questions)
+    @JoinTable()
+    categories: Relation<Category>[]
+}
+```
+
+</CodeGroup>
+
+With a bidirectional relation you can join from either side:
+
+```typescript query from inverse side
+const categoriesWithQuestions = await dataSource
+    .getRepository(Category)
+    .createQueryBuilder("category")
+    .leftJoinAndSelect("category.questions", "question")
+    .getMany()
+```
+
+## Many-to-many with extra columns
+
+The `@ManyToMany` + `@JoinTable` shortcut creates a plain junction table with no extra columns. When you need additional data on the relationship (e.g., an ordering or a timestamp), create an explicit intermediate entity with two `@ManyToOne` relations:
+
+```typescript question-to-category.entity.ts
+import {
+    Entity,
+    PrimaryGeneratedColumn,
+    Column,
+    ManyToOne,
+} from "typeorm"
+import { Question } from "./question"
+import { Category } from "./category"
+
+@Entity()
+export class QuestionToCategory {
+    @PrimaryGeneratedColumn()
+    public questionToCategoryId: number
+
+    @Column()
+    public questionId: number
+
+    @Column()
+    public categoryId: number
+
+    @Column()
+    public order: number
+
+    @ManyToOne(() => Question, (question) => question.questionToCategories)
+    public question: Question
+
+    @ManyToOne(() => Category, (category) => category.questionToCategories)
+    public category: Category
+}
+```
+
+Add the inverse `@OneToMany` to each side:
+
+```typescript question.entity.ts (with extra columns)
+// In Question:
+@OneToMany(
+    () => QuestionToCategory,
+    (questionToCategory) => questionToCategory.question,
+)
+public questionToCategories: QuestionToCategory[]
+```
+
+```typescript category.entity.ts (with extra columns)
+// In Category:
+@OneToMany(
+    () => QuestionToCategory,
+    (questionToCategory) => questionToCategory.category,
+)
+public questionToCategories: QuestionToCategory[]
+```
+
+<Note>
+  When using an intermediate entity, you lose the convenience of the auto-generated junction table. You manage the relationship rows explicitly through the `QuestionToCategory` repository.
+</Note>
+
+## Customizing the junction table
+
+Pass an options object to `@JoinTable` to rename the junction table or its columns:
+
+```typescript
+@ManyToMany(() => Category)
+@JoinTable({
+    name: "question_categories",
+    joinColumn: {
+        name: "question",
+        referencedColumnName: "id",
+    },
+    inverseJoinColumn: {
+        name: "category",
+        referencedColumnName: "id",
+    },
+})
+categories: Category[]
+```

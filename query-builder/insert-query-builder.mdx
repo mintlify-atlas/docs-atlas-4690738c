@@ -1,0 +1,274 @@
+---
+title: "Insert query builder"
+description: "Build and execute INSERT queries with TypeORM's InsertQueryBuilder. Covers bulk inserts, upserts, conflict resolution, INSERT FROM SELECT, and RETURNING."
+---
+
+## Basic insert
+
+Use `InsertQueryBuilder` to build `INSERT` statements. This is the most efficient way to insert rows.
+
+```typescript
+await dataSource
+    .createQueryBuilder()
+    .insert()
+    .into(User)
+    .values([
+        { firstName: "Timber", lastName: "Saw" },
+        { firstName: "Phantom", lastName: "Lancer" },
+    ])
+    .execute()
+```
+
+The `execute()` method returns an `InsertResult` containing generated identifiers and affected rows.
+
+## Bulk insert
+
+Pass an array to `values()` to insert multiple rows in a single statement:
+
+```typescript
+const users = [
+    { firstName: "Alice", lastName: "Smith" },
+    { firstName: "Bob",   lastName: "Jones" },
+    { firstName: "Carol", lastName: "White" },
+]
+
+await dataSource
+    .createQueryBuilder()
+    .insert()
+    .into(User)
+    .values(users)
+    .execute()
+```
+
+This produces a single `INSERT INTO users (...) VALUES (...), (...), (...)` statement and is significantly faster than inserting rows one at a time in a loop.
+
+## Raw SQL values
+
+When a column value must be a SQL expression rather than a bound parameter, provide a function that returns the expression string:
+
+```typescript
+await dataSource
+    .createQueryBuilder()
+    .insert()
+    .into(User)
+    .values({
+        firstName: "Timber",
+        lastName: () => "CONCAT('S', 'A', 'W')",
+    })
+    .execute()
+```
+
+<Warning>
+Raw SQL expressions are inserted verbatim into the query. Never build them from user-supplied input, as doing so opens the door to SQL injection.
+</Warning>
+
+## Insert or ignore
+
+Use `orIgnore()` to suppress errors when the row conflicts with an existing record. The conflicting row is not inserted or updated.
+
+<Tabs>
+  <Tab title="MySQL (INSERT IGNORE)">
+    ```typescript
+    await dataSource
+        .createQueryBuilder()
+        .insert()
+        .into(User)
+        .values({ firstName: "Timber", lastName: "Saw", externalId: "abc123" })
+        .orIgnore()
+        .execute()
+    // → INSERT IGNORE INTO users ...
+    ```
+  </Tab>
+  <Tab title="PostgreSQL / Oracle / MSSQL / SAP HANA (DO NOTHING)">
+    ```typescript
+    await dataSource
+        .createQueryBuilder()
+        .insert()
+        .into(User)
+        .values({ firstName: "Timber", lastName: "Saw", externalId: "abc123" })
+        .orIgnore()
+        .execute()
+    // → INSERT INTO users ... ON CONFLICT DO NOTHING
+    ```
+  </Tab>
+</Tabs>
+
+## Upsert with conflict resolution
+
+Use `orUpdate()` to update specific columns when a conflict is detected on the given conflict target columns.
+
+### Basic upsert
+
+```typescript
+await dataSource
+    .createQueryBuilder()
+    .insert()
+    .into(User)
+    .values({
+        firstName: "Timber",
+        lastName: "Saw",
+        externalId: "abc123",
+    })
+    .orUpdate(
+        ["firstName", "lastName"], // columns to overwrite on conflict
+        ["externalId"],            // conflict target (unique key columns)
+    )
+    .execute()
+```
+
+This produces `ON CONFLICT (externalId) DO UPDATE SET firstName = EXCLUDED.firstName, lastName = EXCLUDED.lastName` on PostgreSQL, or `ON DUPLICATE KEY UPDATE` on MySQL.
+
+### Skip update when values are unchanged (PostgreSQL, Oracle, MSSQL, SAP HANA)
+
+Set `skipUpdateIfNoValuesChanged: true` to avoid touching rows whose values have not actually changed:
+
+```typescript
+await dataSource
+    .createQueryBuilder()
+    .insert()
+    .into(User)
+    .values({ firstName: "Timber", lastName: "Saw", externalId: "abc123" })
+    .orUpdate(["firstName", "lastName"], ["externalId"], {
+        skipUpdateIfNoValuesChanged: true,
+    })
+    .execute()
+```
+
+This appends a `WHERE` clause comparing each overwrite column with `IS DISTINCT FROM EXCLUDED.<column>`.
+
+### Upsert with condition (PostgreSQL, Oracle, MSSQL, SAP HANA)
+
+Provide an `overwriteCondition` to further restrict which conflicting rows are updated:
+
+```typescript
+await dataSource
+    .createQueryBuilder()
+    .insert()
+    .into(User)
+    .values({ firstName: "Timber", lastName: "Saw", externalId: "abc123" })
+    .orUpdate(["firstName", "lastName"], ["externalId"], {
+        overwriteCondition: {
+            where: {
+                firstName: Equal("Phantom"),
+            },
+        },
+    })
+    .execute()
+```
+
+### Partial index (PostgreSQL)
+
+When the conflict target covers a partial index, specify the index predicate:
+
+```typescript
+await dataSource
+    .createQueryBuilder()
+    .insert()
+    .into(User)
+    .values({ firstName: "Timber", lastName: "Saw", externalId: "abc123" })
+    .orUpdate(["firstName", "lastName"], ["externalId"], {
+        skipUpdateIfNoValuesChanged: true,
+        indexPredicate: "date > 2020-01-01",
+    })
+    .execute()
+```
+
+## Insert with RETURNING
+
+Use `.returning()` (or `.output()` as an alias) to retrieve column values from the inserted rows. Support varies by database.
+
+<Tabs>
+  <Tab title="PostgreSQL / CockroachDB">
+    ```typescript
+    const result = await dataSource
+        .createQueryBuilder()
+        .insert()
+        .into(User)
+        .values({ firstName: "Timber", lastName: "Saw" })
+        .returning(["id", "firstName"])
+        .execute()
+
+    console.log(result.raw)
+    // → [{ id: 1, firstName: 'Timber' }]
+    ```
+  </Tab>
+  <Tab title="SQL Server (OUTPUT)">
+    ```typescript
+    const result = await dataSource
+        .createQueryBuilder()
+        .insert()
+        .into(User)
+        .values({ firstName: "Timber", lastName: "Saw" })
+        .output(["id", "firstName"])
+        .execute()
+    // Translated to: INSERT INTO users (...) OUTPUT INSERTED.id, INSERTED.firstName VALUES (...)
+    ```
+  </Tab>
+</Tabs>
+
+<Note>
+MySql, SQLite, and most other databases do not support `RETURNING`. Calling `.returning()` on an unsupported driver throws `ReturningStatementNotSupportedError`.
+</Note>
+
+## INSERT FROM SELECT
+
+Insert rows derived from a `SELECT` query using `valuesFromSelect()`. This creates an `INSERT INTO ... SELECT ...` statement and is useful for data migration, archiving, or copying between tables.
+
+<Steps>
+  <Step title="Build the source SELECT query">
+    ```typescript
+    const selectQuery = dataSource
+        .createQueryBuilder()
+        .select(["user.firstName", "user.lastName"])
+        .from(User, "user")
+        .where("user.isActive = :isActive", { isActive: true })
+    ```
+  </Step>
+  <Step title="Insert from the SELECT query">
+    ```typescript
+    await dataSource
+        .createQueryBuilder()
+        .insert()
+        .into(ArchivedUser, ["firstName", "lastName"])
+        .valuesFromSelect(selectQuery)
+        .execute()
+    ```
+  </Step>
+</Steps>
+
+You can also use a callback to build the subquery inline:
+
+```typescript
+await dataSource
+    .createQueryBuilder()
+    .insert()
+    .into(ArchivedUser, ["firstName", "lastName", "archivedAt"])
+    .valuesFromSelect((qb) =>
+        qb
+            .select(["user.firstName", "user.lastName", "NOW()"])
+            .from(User, "user")
+            .where("user.deletedAt IS NOT NULL"),
+    )
+    .execute()
+```
+
+With a join:
+
+```typescript
+await dataSource
+    .createQueryBuilder()
+    .insert()
+    .into(UserReport, ["userName", "orderCount"])
+    .valuesFromSelect((qb) =>
+        qb
+            .select(["user.name", "COUNT(order.id)"])
+            .from(User, "user")
+            .leftJoin("user.orders", "order")
+            .groupBy("user.id"),
+    )
+    .execute()
+```
+
+<Warning>
+When using `valuesFromSelect()`, entity lifecycle hooks (`@BeforeInsert`, `@AfterInsert`) and subscribers are **not** called because no entity instances are created. The `updateEntity` option also has no effect.
+</Warning>

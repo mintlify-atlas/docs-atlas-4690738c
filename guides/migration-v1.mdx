@@ -1,0 +1,524 @@
+---
+title: Migrating to v1
+description: Breaking changes and migration steps for upgrading from TypeORM 0.3.x to 1.0.
+---
+
+This guide covers every breaking change introduced in TypeORM 1.0. Work through each section that applies to your project.
+
+## Node.js and JavaScript version
+
+TypeORM 1.0 requires **Node.js 20 or later**. The minimum supported JavaScript target is `ES2023`.
+
+## Database clients
+
+### MySQL / MariaDB
+
+<AccordionGroup>
+  <Accordion title="mysql connector removed — use mysql2">
+    The `connectorPackage` option and support for the legacy `mysql` package have been removed. TypeORM now uses `mysql2` exclusively.
+
+    ```bash
+    npm uninstall mysql
+    npm install mysql2
+    ```
+
+    Remove any `connectorPackage` setting from your DataSource options.
+  </Accordion>
+
+  <Accordion title="legacySpatialSupport now defaults to false">
+    TypeORM now defaults to the standard `ST_GeomFromText` / `ST_AsText` spatial functions (MySQL 5.7+ / MySQL 8.0+). If you are on MySQL 5.6 and use spatial types, opt in explicitly:
+
+    ```typescript
+    new DataSource({
+        type: "mysql",
+        legacySpatialSupport: true,
+        // ...
+    })
+    ```
+  </Accordion>
+
+  <Accordion title="width and zerofill column options removed">
+    MySQL 8.4 removed display width for integers and the `ZEROFILL` attribute. Remove these options from your column definitions:
+
+    ```typescript
+    // Before
+    @Column({ type: "int", width: 9, zerofill: true })
+    postCode: number
+
+    // After
+    @Column({ type: "int" })
+    postCode: number
+    ```
+
+    For zero-padded display output, use `String.prototype.padStart()` in application code or `LPAD()` in a raw query.
+  </Accordion>
+</AccordionGroup>
+
+### SQLite
+
+<AccordionGroup>
+  <Accordion title="sqlite3 replaced by better-sqlite3">
+    The `sqlite` driver type now uses `better-sqlite3` as the underlying package:
+
+    ```bash
+    npm uninstall sqlite3
+    npm install better-sqlite3
+    ```
+
+    Update your DataSource type:
+
+    ```typescript
+    new DataSource({
+        type: "better-sqlite3",  // was "sqlite"
+        database: "db.sqlite",
+    })
+    ```
+  </Accordion>
+
+  <Accordion title="flags option removed">
+    The `flags` option (C-level open flags from `sqlite3`) is no longer supported. Use the dedicated `better-sqlite3` options instead:
+
+    - `readonly: true` for read-only mode
+    - `enableWAL: true` for WAL journal mode
+  </Accordion>
+
+  <Accordion title="busyTimeout renamed to timeout">
+    ```typescript
+    new DataSource({
+        type: "better-sqlite3",
+        database: "db.sqlite",
+        timeout: 2000,  // was busyTimeout
+    })
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### MongoDB
+
+TypeORM now requires **`mongodb` driver v7 or later** (`^7.0.0`).
+
+```bash
+npm install mongodb@^7
+```
+
+<AccordionGroup>
+  <Accordion title="Removed connection options">
+    | Removed option | Replacement |
+    |---|---|
+    | `appname` | `appName` |
+    | `fsync` / `j` | `writeConcern: { journal: true }` |
+    | `keepAlive` / `keepAliveInitialDelay` | Remove — always on since driver v6 |
+    | `ssl` | `tls` |
+    | `sslCA` | `tlsCAFile` |
+    | `sslCert` / `sslKey` | `tlsCertificateKeyFile` |
+    | `sslPass` | `tlsCertificateKeyFilePassword` |
+    | `sslValidate` | `tlsAllowInvalidCertificates` (inverted) |
+    | `useNewUrlParser` / `useUnifiedTopology` | Remove — no-op since driver v4 |
+    | `w` | `writeConcern: { w: 1 }` |
+    | `wtimeout` / `wtimeoutMS` | `writeConcern: { wtimeoutMS: 2500 }` |
+  </Accordion>
+
+  <Accordion title="stats() method removed">
+    The `stats()` method was removed from `MongoQueryRunner`, `MongoEntityManager`, and `MongoRepository`. Use the `$collStats` aggregation stage instead:
+
+    ```typescript
+    // Before
+    const stats = await mongoRepository.stats()
+    console.log(stats.count)
+
+    // After
+    const [stats] = await dataSource.mongoManager
+        .aggregate(MyEntity, [{ $collStats: { storageStats: {} } }])
+        .toArray()
+    console.log(stats.storageStats.count)
+    ```
+  </Accordion>
+
+  <Accordion title="getMongoRepository and getMongoManager globals removed">
+    ```typescript
+    // Before
+    import { getMongoManager, getMongoRepository } from "typeorm"
+    const manager = getMongoManager()
+    const repo = getMongoRepository(User)
+
+    // After
+    const manager = dataSource.mongoManager
+    const repo = dataSource.getMongoRepository(User)
+    ```
+
+    Internal MongoDB types are no longer exported from TypeORM. Import `ObjectId` from `mongodb` directly.
+  </Accordion>
+</AccordionGroup>
+
+### SAP HANA
+
+Several deprecated SAP HANA connection aliases were removed:
+
+| Removed | Replacement |
+|---|---|
+| `hanaClientDriver` | `driver` |
+| `pool.max` | `pool.maxConnectedOrPooled` |
+| `pool.requestTimeout` | `pool.maxWaitTimeoutIfPoolExhausted` |
+| `pool.idleTimeout` | `pool.maxPooledIdleTime` (seconds) |
+| `pool.min`, `pool.maxWaitingRequests`, `pool.checkInterval` | No replacement |
+
+### MS SQL Server
+
+The `domain` option on `SqlServerConnectionCredentialsOptions` was removed. Use the `authentication` option with NTLM type:
+
+```typescript
+// Before
+new DataSource({ type: "mssql", domain: "MYDOMAIN", username: "user", password: "pass" })
+
+// After
+new DataSource({
+    type: "mssql",
+    authentication: {
+        type: "ntlm",
+        options: { domain: "MYDOMAIN", userName: "user", password: "pass" },
+    },
+})
+```
+
+### Expo
+
+Support for the legacy Expo SQLite driver has been removed. Upgrade to Expo SDK v52 or later, which provides the modern async SQLite API.
+
+## Global convenience functions removed
+
+The following deprecated global functions have been removed. Replace them with equivalent methods on your `DataSource` instance:
+
+| Removed global | Replacement |
+|---|---|
+| `createConnection()` / `createConnections()` | `new DataSource(...).initialize()` |
+| `getConnection()` | Use your `DataSource` instance directly |
+| `getConnectionManager()` | Manage `DataSource` instances yourself |
+| `getConnectionOptions()` | Read config manually |
+| `getManager()` | `dataSource.manager` |
+| `getSqljsManager()` | `dataSource.manager` |
+| `getRepository(Entity)` | `dataSource.getRepository(Entity)` |
+| `getTreeRepository(Entity)` | `dataSource.getTreeRepository(Entity)` |
+| `createQueryBuilder("alias")` | `dataSource.createQueryBuilder("alias")` |
+
+```typescript
+// Before
+const repo = getRepository(User)
+const qb = createQueryBuilder("user")
+
+// After
+const repo = dataSource.getRepository(User)
+const qb = dataSource.createQueryBuilder("user")
+```
+
+## DataSource / Connection
+
+### Connection renamed to DataSource
+
+The `Connection` class alias and `ConnectionOptions` type alias have been removed. Use `DataSource` and `DataSourceOptions` directly.
+
+Old `Connection` method names have also been removed:
+
+| Removed | Replacement |
+|---|---|
+| `Connection.connect()` | `DataSource.initialize()` |
+| `Connection.close()` | `DataSource.destroy()` |
+
+### ConnectionManager removed
+
+`ConnectionManager` has been removed. Create and manage your `DataSource` instances directly.
+
+## Columns
+
+### readonly replaced by update: false
+
+```typescript
+// Before
+@Column({ readonly: true })
+authorName: string
+
+// After
+@Column({ update: false })
+authorName: string
+```
+
+### unsigned removed for non-integer numeric types
+
+The `unsigned` property on decimal/float column type overloads has been removed (MySQL deprecated `UNSIGNED` for non-integer numeric types). The `unsigned` option on integer column types is not affected.
+
+## Repository
+
+### findByIds removed
+
+```typescript
+// Before
+const users = await repository.findByIds([1, 2, 3])
+
+// After
+import { In } from "typeorm"
+const users = await repository.findBy({ id: In([1, 2, 3]) })
+```
+
+### exist() renamed to exists()
+
+```typescript
+// Before
+const hasUsers = await userRepository.exist({ where: { isActive: true } })
+
+// After
+const hasUsers = await userRepository.exists({ where: { isActive: true } })
+```
+
+### AbstractRepository, @EntityRepository, and getCustomRepository removed
+
+These were deprecated in v0.3. Migrate to `Repository.extend()`:
+
+```typescript
+// Before
+@EntityRepository(User)
+class UserRepository extends AbstractRepository<User> {
+    findByName(name: string) {
+        return this.repository.findOneBy({ name })
+    }
+}
+const userRepo = dataSource.getCustomRepository(UserRepository)
+
+// After
+const userRepository = dataSource.getRepository(User).extend({
+    findByName(name: string) {
+        return this.findOneBy({ name })
+    },
+})
+```
+
+The error classes `CustomRepositoryDoesNotHaveEntityError`, `CustomRepositoryCannotInheritRepositoryError`, and `CustomRepositoryNotFoundError` were also removed.
+
+### @RelationCount and loadRelationCountAndMap removed
+
+```typescript
+// Before
+@RelationCount((post: Post) => post.categories)
+categoryCount: number
+
+// After — use @VirtualColumn with a sub-query
+@VirtualColumn({
+    query: (alias) =>
+        `SELECT COUNT(*) FROM post_categories_category WHERE postId = ${alias}.id`,
+})
+categoryCount: number
+```
+
+## QueryBuilder
+
+### printSql renamed to logQuery
+
+```typescript
+// Before
+.printSql().getMany()
+
+// After
+.logQuery().getMany()
+```
+
+### onConflict removed
+
+```typescript
+// Before
+.onConflict(`("id") DO NOTHING`)
+
+// After
+.orIgnore()
+
+// Before
+.onConflict(`("id") DO UPDATE SET "title" = :title`).setParameter("title", post.title)
+
+// After
+.orUpdate(["title"], ["id"])
+```
+
+### orUpdate object overload removed
+
+```typescript
+// Before
+.orUpdate({ conflict_target: ["date"], overwrite: ["title"] })
+
+// After
+.orUpdate(["title"], ["date"])
+```
+
+### setNativeParameters removed
+
+Use `setParameters()` instead.
+
+### WhereExpression type alias removed
+
+Use `WhereExpressionBuilder` instead.
+
+### Deprecated lock modes removed
+
+```typescript
+// Before
+.setLock("pessimistic_partial_write")
+
+// After
+.setLock("pessimistic_write").setOnLocked("skip_locked")
+
+// Before
+.setLock("pessimistic_write_or_fail")
+
+// After
+.setLock("pessimistic_write").setOnLocked("nowait")
+```
+
+The same applies to find options:
+
+```typescript
+// Before
+{ lock: { mode: "pessimistic_partial_write" } }
+
+// After
+{ lock: { mode: "pessimistic_write", onLocked: "skip_locked" } }
+```
+
+## Migrations
+
+### getAllMigrations renamed to getMigrations
+
+```typescript
+// Before
+const migrations = await migrationExecutor.getAllMigrations()
+
+// After
+const migrations = migrationExecutor.getMigrations()
+```
+
+### QueryRunner.loadedTables and loadedViews removed
+
+```typescript
+// Before
+const tables = queryRunner.loadedTables
+const views = queryRunner.loadedViews
+
+// After
+const tables = await queryRunner.getTables()
+const views = await queryRunner.getViews()
+```
+
+## Configuration
+
+### invalidWhereValuesBehavior now defaults to throw
+
+In v0.3, `null` and `undefined` values in `find` conditions were silently ignored. In v1.0, both **throw an error by default**.
+
+```typescript
+// v0.3: silently returns all rows (null is ignored)
+// v1.0: throws TypeORMError
+await repository.find({ where: { text: null } })
+```
+
+To match null values, use the `IsNull()` operator:
+
+```typescript
+import { IsNull } from "typeorm"
+await repository.find({ where: { text: IsNull() } })
+```
+
+To restore the v0.3 behavior for a gradual migration:
+
+```typescript
+new DataSource({
+    // ...
+    invalidWhereValuesBehavior: {
+        null: "ignore",
+        undefined: "ignore",
+    },
+})
+```
+
+### Environment variable configuration removed
+
+The `TYPEORM_*` environment variables, `ConnectionOptionsEnvReader`, and `ormconfig.env` are no longer supported. TypeORM no longer auto-loads `.env` files.
+
+Move your configuration to a TypeScript or JavaScript file and read environment variables directly:
+
+```typescript
+// ormconfig.ts
+export default {
+    type: process.env.DB_TYPE,
+    url: process.env.DB_URL,
+    // ...
+}
+```
+
+### name property on DataSource removed
+
+The `name` property on `DataSource` and `BaseDataSourceOptions` has been removed. Manage your `DataSource` instances directly instead of relying on named connections.
+
+`ConnectionOptionsReader.all()` has been renamed to `get()` and the `get(name)` / `has(name)` overloads were removed:
+
+```typescript
+const reader = new ConnectionOptionsReader()
+const [options] = await reader.get()          // single data source
+const allOptions = await reader.get()         // multiple data sources
+const pgOptions = allOptions.find((o) => o.type === "postgres")
+```
+
+## IoC container support removed
+
+The built-in IoC container integration has been removed: `useContainer()`, `getFromContainer()`, `ContainerInterface`, `ContainedType`, and `UseContainerOptions` no longer exist. The `typeorm-typedi-extensions` and `typeorm-routing-controllers-extensions` packages are not compatible with v1.
+
+<Note>
+**NestJS users**: the `@nestjs/typeorm` package has its own integration that does not depend on the removed container system. No changes are needed.
+</Note>
+
+### Subscribers and migrations with dependencies
+
+TypeORM instantiates subscribers and migrations using a zero-argument constructor. Access services via the `DataSource` inside the migration:
+
+```typescript
+export class MyMigration1234 implements MigrationInterface {
+    async up(queryRunner: QueryRunner): Promise<void> {
+        const repo = queryRunner.connection.getRepository(User)
+        // ...
+    }
+}
+```
+
+### Replacing typeorm-typedi-extensions
+
+```typescript
+// Before (with typeorm-typedi-extensions)
+class UserService {
+    @InjectManager() private manager: EntityManager
+    @InjectRepository(User) private userRepository: Repository<User>
+}
+
+// After — inject the DataSource instead
+class UserService {
+    private manager: EntityManager
+    private userRepository: Repository<User>
+
+    constructor(dataSource: DataSource) {
+        this.manager = dataSource.manager
+        this.userRepository = dataSource.getRepository(User)
+    }
+}
+```
+
+If you use a DI framework, register `DataSource` as a provider in your container:
+
+```typescript
+// typedi example
+import { Container } from "typedi"
+
+const dataSource = new DataSource({ /* ... */ })
+await dataSource.initialize()
+
+Container.set(DataSource, dataSource)
+Container.set("UserRepository", dataSource.getRepository(User))
+```
+
+## Other changes
+
+- **Redis cache**: Legacy (v3/v4) Redis clients are no longer supported in `RedisQueryResultCache`.
+- **Hashing**: TypeORM now uses the Node.js built-in `crypto` module for hashing. `RandomGenerator.sha1` was updated to the standard SHA-1 implementation.
+- **Glob patterns**: Glob handling is now done by `tinyglobby` instead of `glob`. Behavior is nearly identical, but edge cases may differ.

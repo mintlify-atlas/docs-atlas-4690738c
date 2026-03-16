@@ -1,0 +1,189 @@
+---
+title: Active Record vs Data Mapper
+description: Learn the two patterns TypeORM supports for database access — Active Record and Data Mapper — and how to choose between them.
+---
+
+TypeORM supports two approaches for accessing the database: **Active Record** and **Data Mapper**. Both are first-class in TypeORM. Understanding the trade-offs helps you choose the right pattern for your application.
+
+## Active Record pattern
+
+In the Active Record pattern, your entity class is also responsible for database operations. You extend `BaseEntity`, which gives the class static and instance methods to save, remove, and query records directly.
+
+```typescript
+import { BaseEntity, Entity, PrimaryGeneratedColumn, Column } from "typeorm"
+
+@Entity()
+export class User extends BaseEntity {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    @Column()
+    firstName: string
+
+    @Column()
+    lastName: string
+
+    @Column()
+    isActive: boolean
+}
+```
+
+With `BaseEntity` in place, you call database methods directly on the class or instance:
+
+```typescript
+// Create and save
+const user = new User()
+user.firstName = "Timber"
+user.lastName = "Saw"
+user.isActive = true
+await user.save()
+
+// Remove
+await user.remove()
+
+// Query
+const users = await User.find({ skip: 2, take: 5 })
+const activeUsers = await User.findBy({ isActive: true })
+const timber = await User.findOneBy({ firstName: "Timber", lastName: "Saw" })
+```
+
+### Custom query methods
+
+You can add static methods to the entity class to encapsulate common queries:
+
+```typescript
+@Entity()
+export class User extends BaseEntity {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    @Column()
+    firstName: string
+
+    @Column()
+    lastName: string
+
+    @Column()
+    isActive: boolean
+
+    static findByName(firstName: string, lastName: string) {
+        return this.createQueryBuilder("user")
+            .where("user.firstName = :firstName", { firstName })
+            .andWhere("user.lastName = :lastName", { lastName })
+            .getMany()
+    }
+}
+
+// Usage
+const users = await User.findByName("Timber", "Saw")
+```
+
+<Note>
+`BaseEntity` mirrors most of the `Repository` API. You rarely need to interact with `Repository` or `EntityManager` directly when using Active Record.
+</Note>
+
+## Data Mapper pattern
+
+In the Data Mapper pattern, entities are plain classes that only define their shape. All database operations live in a separate `Repository` obtained from the `DataSource`. The entity itself has no knowledge of how it is persisted.
+
+```typescript
+import { Entity, PrimaryGeneratedColumn, Column } from "typeorm"
+
+@Entity()
+export class User {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    @Column()
+    firstName: string
+
+    @Column()
+    lastName: string
+
+    @Column()
+    isActive: boolean
+}
+```
+
+All database access goes through the repository:
+
+```typescript
+const userRepository = dataSource.getRepository(User)
+
+// Create and save
+const user = new User()
+user.firstName = "Timber"
+user.lastName = "Saw"
+user.isActive = true
+await userRepository.save(user)
+
+// Remove
+await userRepository.remove(user)
+
+// Query
+const users = await userRepository.find({ skip: 2, take: 5 })
+const activeUsers = await userRepository.findBy({ isActive: true })
+const timber = await userRepository.findOneBy({
+    firstName: "Timber",
+    lastName: "Saw",
+})
+```
+
+### Custom repositories
+
+To add domain-specific query methods, extend the repository using `extend()`:
+
+```typescript
+const userRepository = dataSource.getRepository(User).extend({
+    findByName(firstName: string, lastName: string) {
+        return this.createQueryBuilder("user")
+            .where("user.firstName = :firstName", { firstName })
+            .andWhere("user.lastName = :lastName", { lastName })
+            .getMany()
+    },
+})
+
+// Usage
+const users = await userRepository.findByName("Timber", "Saw")
+```
+
+## Side-by-side comparison
+
+The following table shows the same operations in both patterns:
+
+| Operation | Active Record | Data Mapper |
+|---|---|---|
+| Save | `await user.save()` | `await repo.save(user)` |
+| Remove | `await user.remove()` | `await repo.remove(user)` |
+| Find all | `await User.find()` | `await repo.find()` |
+| Find by condition | `await User.findBy({ isActive: true })` | `await repo.findBy({ isActive: true })` |
+| Find one | `await User.findOneBy({ id: 1 })` | `await repo.findOneBy({ id: 1 })` |
+| Count | `await User.countBy({ isActive: true })` | `await repo.countBy({ isActive: true })` |
+| Exists | `await User.existsBy({ id: 1 })` | `await repo.existsBy({ id: 1 })` |
+| Query builder | `User.createQueryBuilder("u")` | `repo.createQueryBuilder("u")` |
+
+## Trade-offs
+
+| | Active Record | Data Mapper |
+|---|---|---|
+| **Complexity** | Low — everything in one class | Higher — entities and repositories are separate |
+| **Testability** | Harder — entity methods require a live DataSource | Easier — repositories can be mocked independently |
+| **Maintainability** | Works well for small apps | Scales better as the codebase grows |
+| **Dependency** | Entity depends on TypeORM's `BaseEntity` | Entity is a plain class with no runtime dependency |
+| **DI frameworks** | Not a natural fit | Repositories integrate naturally with DI containers |
+
+## Which one should you use?
+
+Choose **Active Record** when:
+- You are building a small application or prototype.
+- You want minimal boilerplate and a flat file structure.
+- You do not need to mock database calls in unit tests.
+
+Choose **Data Mapper** when:
+- You are building a medium-to-large application.
+- Testability and separation of concerns are priorities.
+- You use a dependency injection framework (e.g., NestJS).
+
+<Tip>
+Both patterns can coexist in the same project. You are not forced to pick one globally — use what makes sense for each part of your application.
+</Tip>

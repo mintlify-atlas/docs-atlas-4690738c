@@ -1,0 +1,192 @@
+---
+title: "Many-to-one / one-to-many relations"
+description: "Model parent-child associations where one entity owns many related records. @ManyToOne holds the foreign key; @OneToMany is the inverse reference."
+---
+
+A many-to-one / one-to-many relation is one where Entity A can have multiple instances of Entity B, but each Entity B belongs to exactly one Entity A. A typical example is `User` and `Photo`: a user can have many photos, but each photo belongs to one user.
+
+## Defining the relation
+
+`@ManyToOne` goes on the "many" side (the child) and `@OneToMany` goes on the "one" side (the parent):
+
+<CodeGroup>
+
+```typescript photo.entity.ts
+import { Entity, PrimaryGeneratedColumn, Column, ManyToOne } from "typeorm"
+import { User } from "./User"
+
+@Entity()
+export class Photo {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    @Column()
+    url: string
+
+    @ManyToOne(() => User, (user) => user.photos)
+    user: User
+}
+```
+
+```typescript user.entity.ts
+import { Entity, PrimaryGeneratedColumn, Column, OneToMany } from "typeorm"
+import { Photo } from "./Photo"
+
+@Entity()
+export class User {
+    @PrimaryGeneratedColumn()
+    id: number
+
+    @Column()
+    name: string
+
+    @OneToMany(() => Photo, (photo) => photo.user)
+    photos: Photo[]
+}
+```
+
+</CodeGroup>
+
+### Which side owns the relation?
+
+The `@ManyToOne` side is always the owning side. TypeORM places the foreign key column on the table of the entity that declares `@ManyToOne`. In this example, `photo.userId` is the foreign key:
+
+```
++-------------+--------------+----------------------------+
+|                         photo                           |
++-------------+--------------+----------------------------+
+| id          | int          | PRIMARY KEY AUTO_INCREMENT |
+| url         | varchar(255) |                            |
+| userId      | int          | FOREIGN KEY                |
++-------------+--------------+----------------------------+
+
++-------------+--------------+----------------------------+
+|                          user                           |
++-------------+--------------+----------------------------+
+| id          | int          | PRIMARY KEY AUTO_INCREMENT |
+| name        | varchar(255) |                            |
++-------------+--------------+----------------------------+
+```
+
+<Note>
+  `@OneToMany` cannot exist without a corresponding `@ManyToOne` on the other side. `@ManyToOne` can exist on its own without `@OneToMany`.
+</Note>
+
+## Saving the relation
+
+You can assign the relation from either side:
+
+<Tabs>
+  <Tab title="From the parent (OneToMany side)">
+    ```typescript
+    const photo1 = new Photo()
+    photo1.url = "me.jpg"
+    await dataSource.manager.save(photo1)
+
+    const photo2 = new Photo()
+    photo2.url = "me-and-bears.jpg"
+    await dataSource.manager.save(photo2)
+
+    const user = new User()
+    user.name = "John"
+    user.photos = [photo1, photo2]
+    await dataSource.manager.save(user)
+    ```
+  </Tab>
+  <Tab title="From the child (ManyToOne side)">
+    ```typescript
+    const user = new User()
+    user.name = "Leo"
+    await dataSource.manager.save(user)
+
+    const photo1 = new Photo()
+    photo1.url = "me.jpg"
+    photo1.user = user
+    await dataSource.manager.save(photo1)
+
+    const photo2 = new Photo()
+    photo2.url = "me-and-bears.jpg"
+    photo2.user = user
+    await dataSource.manager.save(photo2)
+    ```
+  </Tab>
+</Tabs>
+
+With `cascade: true` on `@OneToMany`, saving the parent automatically saves the children:
+
+```typescript cascade from parent
+@OneToMany(() => Photo, (photo) => photo.user, { cascade: true })
+photos: Photo[]
+```
+
+## Loading the relation
+
+Use the `relations` option in `FindOptions` or a `QueryBuilder` join:
+
+<CodeGroup>
+
+```typescript find options
+// Load users with their photos
+const users = await dataSource.getRepository(User).find({
+    relations: { photos: true },
+})
+
+// Load photos with their owner
+const photos = await dataSource.getRepository(Photo).find({
+    relations: { user: true },
+})
+```
+
+```typescript QueryBuilder
+// Load from the parent side
+const users = await dataSource
+    .getRepository(User)
+    .createQueryBuilder("user")
+    .leftJoinAndSelect("user.photos", "photo")
+    .getMany()
+
+// Load from the child side
+const photos = await dataSource
+    .getRepository(Photo)
+    .createQueryBuilder("photo")
+    .leftJoinAndSelect("photo.user", "user")
+    .getMany()
+```
+
+</CodeGroup>
+
+## Customizing the join column
+
+`@ManyToOne` creates the foreign key column automatically. Use `@JoinColumn` to customize its name or the referenced column:
+
+```typescript custom column name
+@ManyToOne(() => User, (user) => user.photos)
+@JoinColumn({ name: "owner_id" })
+user: User
+// Creates "owner_id" instead of "userId"
+```
+
+```typescript composite join
+@ManyToOne(() => User)
+@JoinColumn([
+    { name: "user_id",  referencedColumnName: "id" },
+    { name: "locale_id", referencedColumnName: "locale_id" },
+])
+user: User
+```
+
+## Relation options
+
+Pass options as the third argument (or second if no inverse side is provided):
+
+```typescript
+@ManyToOne(() => User, (user) => user.photos, {
+    nullable: false,         // require the relation
+    onDelete: "CASCADE",     // delete photos when user is deleted
+    eager: true,             // always load the user with each photo
+    cascade: ["insert"],     // cascade insert only
+})
+user: User
+```
+
+See [Relations](/relations/relations#relation-options) for the full list of options.

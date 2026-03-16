@@ -1,0 +1,299 @@
+---
+title: "Relations FAQ"
+description: "Answers to common TypeORM relation questions: loading, saving, deleting, cascades, circular imports, relation IDs, and foreign key constraints."
+---
+
+<AccordionGroup>
+  <Accordion title="How do I load relations?">
+    The two standard approaches are `FindOptions` and `QueryBuilder`.
+
+    **Using `FindOptions`** — pass a `relations` object to any `find*` method:
+
+    ```typescript
+    const users = await dataSource.getRepository(User).find({
+        relations: {
+            profile: true,
+            photos: true,
+            videos: true,
+        },
+    })
+    ```
+
+    **Using `QueryBuilder`** — join each relation explicitly:
+
+    ```typescript
+    const user = await dataSource
+        .getRepository(User)
+        .createQueryBuilder("user")
+        .leftJoinAndSelect("user.profile", "profile")
+        .leftJoinAndSelect("user.photos", "photo")
+        .leftJoinAndSelect("user.videos", "video")
+        .getMany()
+    ```
+
+    Use `innerJoinAndSelect` instead of `leftJoinAndSelect` when you want to exclude records that have no matching relation.
+
+    See the [QueryBuilder](/query-builder/select-query-builder) docs for filtering, ordering, and pagination.
+  </Accordion>
+
+  <Accordion title="How do I save a relation?">
+    Assign the related entity (or array of entities) to the relation property, then save the owner.
+
+    **One-to-one / many-to-one** — assign a single entity:
+
+    ```typescript
+    const profile = new Profile()
+    profile.gender = "male"
+    profile.photo = "me.jpg"
+    await dataSource.manager.save(profile)
+
+    const user = new User()
+    user.name = "Joe"
+    user.profile = profile
+    await dataSource.manager.save(user)
+    ```
+
+    **One-to-many / many-to-many** — assign an array:
+
+    ```typescript
+    const photo1 = new Photo()
+    photo1.url = "me.jpg"
+    await dataSource.manager.save(photo1)
+
+    const user = new User()
+    user.name = "John"
+    user.photos = [photo1]
+    await dataSource.manager.save(user)
+    ```
+
+    With `cascade: true` (or `cascade: ["insert"]`) on the relation, you can skip saving the related entity first — TypeORM handles it when you save the owner.
+  </Accordion>
+
+  <Accordion title="How do I delete a record that has relations?">
+    The safest approach depends on whether you want to delete related records too.
+
+    **Remove the owner only (keep related records):**
+
+    Set `onDelete: "SET NULL"` or `onDelete: "RESTRICT"` on the relation, clear the relation first, and then delete:
+
+    ```typescript
+    const user = await dataSource.getRepository(User).findOne({
+        where: { id: 1 },
+        relations: { photos: true },
+    })
+
+    // Detach photos before deleting the user
+    user.photos = []
+    await dataSource.manager.save(user)
+    await dataSource.manager.remove(user)
+    ```
+
+    **Delete the owner and cascade to related records:**
+
+    Set `onDelete: "CASCADE"` on the relation decorator and delete directly:
+
+    ```typescript
+    @OneToMany(() => Photo, (photo) => photo.user, {
+        onDelete: "CASCADE",
+    })
+    photos: Photo[]
+    ```
+
+    ```typescript
+    await dataSource.getRepository(User).delete(1)
+    ```
+
+    **Soft delete:**
+
+    With `cascade: ["soft-remove"]`, calling `softRemove` on the owner also soft-deletes related entities:
+
+    ```typescript
+    const user = await dataSource.getRepository(User).findOne({
+        where: { id: 1 },
+        relations: { photos: true },
+    })
+    await dataSource.manager.softRemove(user)
+    ```
+  </Accordion>
+
+  <Accordion title="How do I use cascade options?">
+    Set `cascade` on the relation to a boolean or an array of operations:
+
+    ```typescript
+    // All operations
+    @OneToMany(() => Photo, (photo) => photo.user, { cascade: true })
+    photos: Photo[]
+
+    // Insert and update only
+    @OneToMany(() => Photo, (photo) => photo.user, {
+        cascade: ["insert", "update"],
+    })
+    photos: Photo[]
+
+    // Soft-remove only
+    @OneToMany(() => Photo, (photo) => photo.user, {
+        cascade: ["soft-remove"],
+    })
+    photos: Photo[]
+    ```
+
+    Available values: `"insert"`, `"update"`, `"remove"`, `"soft-remove"`, `"recover"`.
+
+    `cascade` is a TypeORM application-level feature. For database-level cascades, use `onDelete` and `onUpdate` on the relation options.
+  </Accordion>
+
+  <Accordion title="How do I fix circular import errors with Relation<T>?">
+    When two entity files import each other, TypeScript's `emitDecoratorMetadata` can cause circular dependency issues at runtime in ESM projects.
+
+    The solution is to:
+    1. Use `import type` for the circular import (prevents JavaScript from generating an `import` statement).
+    2. Wrap the relation type in `Relation<T>` from TypeORM (prevents metadata reflection from capturing the circular type).
+
+    ```typescript action.entity.ts
+    import { Entity, PrimaryColumn, Column, ManyToMany } from "typeorm"
+    import type { Person } from "./Person"
+    import { Relation } from "typeorm"
+
+    @Entity()
+    export class ActionLog {
+        @PrimaryColumn()
+        id: number
+
+        @Column()
+        action: string
+
+        @ManyToMany("Person", (person: Person) => person.id)
+        person: Relation<Person>
+    }
+    ```
+
+    ```typescript person.entity.ts
+    import { Entity, PrimaryColumn, ManyToMany } from "typeorm"
+    import type { ActionLog } from "./Action"
+    import { Relation } from "typeorm"
+
+    @Entity()
+    export class Person {
+        @PrimaryColumn()
+        id: number
+
+        @ManyToMany("ActionLog", (actionLog: ActionLog) => actionLog.id)
+        log: Relation<ActionLog>
+    }
+    ```
+
+    `Relation<T>` is a transparent type alias (`type Relation<T> = T`), so it has zero runtime cost.
+  </Accordion>
+
+  <Accordion title="How do I get a relation ID without loading the full relation?">
+    TypeORM exposes foreign key values only when the relation is joined. To access the foreign key ID without a join, add a `@Column` property with the same name as the generated foreign key column:
+
+    ```typescript user.entity.ts
+    import {
+        Entity,
+        PrimaryGeneratedColumn,
+        Column,
+        OneToOne,
+        JoinColumn,
+    } from "typeorm"
+    import { Profile } from "./Profile"
+
+    @Entity()
+    export class User {
+        @PrimaryGeneratedColumn()
+        id: number
+
+        @Column()
+        name: string
+
+        @Column({ nullable: true })
+        profileId: number         // exposes the foreign key value
+
+        @OneToOne(() => Profile)
+        @JoinColumn()
+        profile: Profile
+    }
+    ```
+
+    Now loading a user without joining the profile still returns `profileId`:
+
+    ```typescript
+    // User { id: 1, name: "Umed", profileId: 1 }
+    const user = await dataSource.getRepository(User).findOneBy({ id: 1 })
+    ```
+  </Accordion>
+
+  <Accordion title="How do I create a self-referencing relation?">
+    Point the relation back at the same entity. This is useful for tree structures, adjacency lists, and nested categories:
+
+    ```typescript category.entity.ts
+    import {
+        Entity,
+        PrimaryGeneratedColumn,
+        Column,
+        ManyToOne,
+        OneToMany,
+    } from "typeorm"
+
+    @Entity()
+    export class Category {
+        @PrimaryGeneratedColumn()
+        id: number
+
+        @Column()
+        title: string
+
+        @ManyToOne(() => Category, (category) => category.childCategories)
+        parentCategory: Category
+
+        @OneToMany(() => Category, (category) => category.parentCategory)
+        childCategories: Category[]
+    }
+    ```
+
+    For full hierarchical tree support (materialized paths, nested sets, closure tables), see TypeORM's [tree entities](/entity/tree-entities).
+  </Accordion>
+
+  <Accordion title="How do I disable foreign key constraint creation?">
+    Set `createForeignKeyConstraints: false` on the relation. TypeORM will still model the logical relation but will not add a database-level constraint:
+
+    ```typescript
+    import { Entity, PrimaryColumn, Column, ManyToOne } from "typeorm"
+    import { Person } from "./Person"
+
+    @Entity()
+    export class ActionLog {
+        @PrimaryColumn()
+        id: number
+
+        @Column()
+        action: string
+
+        @ManyToOne(() => Person, {
+            createForeignKeyConstraints: false,
+        })
+        person: Person
+    }
+    ```
+
+    This is useful for performance-sensitive tables where referential integrity is enforced at the application layer.
+  </Accordion>
+
+  <Accordion title="How do I avoid relation property initializer bugs?">
+    Do not initialize relation arrays on the property declaration or in the constructor:
+
+    ```typescript wrong — causes data loss
+    @ManyToMany(() => Category)
+    @JoinTable()
+    categories: Category[] = []  // never do this
+    ```
+
+    When TypeORM loads an entity without joining `categories`, the property is left `undefined`. If you have initialized it to `[]`, the loaded entity will have `categories: []`. Saving that entity will then remove all existing category associations from the database because TypeORM interprets an empty array as "all relations were removed".
+
+    ```typescript correct
+    @ManyToMany(() => Category)
+    @JoinTable()
+    categories: Category[]  // no initializer
+    ```
+  </Accordion>
+</AccordionGroup>
